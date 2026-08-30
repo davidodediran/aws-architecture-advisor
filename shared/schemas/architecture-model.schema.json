@@ -1,0 +1,214 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://aws-arch-advisor.dev/schemas/architecture-model.json",
+  "title": "ArchitectureModel",
+  "description": "AWS Architecture Advisor architecture model schema",
+  "type": "object",
+  "required": ["schemaVersion", "metadata", "network", "resources", "connections", "securityGroups", "iamRoles", "tags"],
+  "properties": {
+    "schemaVersion": { "type": "string", "const": "1.0" },
+    "metadata": { "$ref": "#/definitions/ModelMetadata" },
+    "network": { "$ref": "#/definitions/NetworkTopology" },
+    "resources": { "type": "array", "items": { "$ref": "#/definitions/Resource" }, "maxItems": 50 },
+    "connections": { "type": "array", "items": { "$ref": "#/definitions/Connection" }, "maxItems": 200 },
+    "securityGroups": { "type": "array", "items": { "$ref": "#/definitions/SecurityGroup" }, "maxItems": 25 },
+    "iamRoles": { "type": "array", "items": { "$ref": "#/definitions/IamRole" } },
+    "tags": { "type": "object", "additionalProperties": { "type": "string" } }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "ModelMetadata": {
+      "type": "object",
+      "required": ["projectId", "userId", "name", "description", "region", "createdAt", "updatedAt", "version", "cleanupLambdaEnabled", "namingPrefix"],
+      "properties": {
+        "projectId": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "description": { "type": "string", "maxLength": 1024 },
+        "region": { "$ref": "#/definitions/AwsRegion" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "version": { "type": "integer", "minimum": 1 },
+        "templateId": { "type": "string" },
+        "cleanupLambdaEnabled": { "type": "boolean" },
+        "namingPrefix": { "type": "string", "pattern": "^[a-z][a-z0-9-]{2,19}$" }
+      },
+      "additionalProperties": false
+    },
+    "NetworkTopology": {
+      "type": "object",
+      "required": ["subnets", "availabilityZones", "publicAccess"],
+      "properties": {
+        "vpc": { "$ref": "#/definitions/VpcConfig" },
+        "subnets": { "type": "array", "items": { "$ref": "#/definitions/Subnet" } },
+        "availabilityZones": { "type": "array", "items": { "type": "string" } },
+        "publicAccess": { "type": "array", "items": { "$ref": "#/definitions/PublicAccessPoint" } }
+      },
+      "additionalProperties": false
+    },
+    "VpcConfig": {
+      "type": "object",
+      "required": ["cidrBlock", "enableDnsHostnames", "enableDnsSupport", "internetGateway", "natGateway"],
+      "properties": {
+        "cidrBlock": { "type": "string" },
+        "enableDnsHostnames": { "type": "boolean" },
+        "enableDnsSupport": { "type": "boolean" },
+        "internetGateway": { "type": "boolean" },
+        "natGateway": { "$ref": "#/definitions/NatGatewayConfig" }
+      },
+      "additionalProperties": false
+    },
+    "NatGatewayConfig": {
+      "type": "object",
+      "required": ["enabled", "type"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "type": { "type": "string", "enum": ["single", "per-az"] }
+      },
+      "additionalProperties": false
+    },
+    "Subnet": {
+      "type": "object",
+      "required": ["id", "name", "type", "cidrBlock", "availabilityZone"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["public", "private", "isolated"] },
+        "cidrBlock": { "type": "string" },
+        "availabilityZone": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "PublicAccessPoint": {
+      "type": "object",
+      "required": ["resourceId", "type"],
+      "properties": {
+        "resourceId": { "type": "string" },
+        "type": { "type": "string", "enum": ["api-gateway", "cloudfront", "alb", "nlb"] },
+        "customDomain": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "Resource": {
+      "type": "object",
+      "required": ["id", "type", "name", "logicalId", "config"],
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "$ref": "#/definitions/ServiceType" },
+        "name": { "type": "string" },
+        "logicalId": { "type": "string" },
+        "config": { "type": "object" },
+        "subnet": { "type": "string" },
+        "position": { "$ref": "#/definitions/DiagramPosition" },
+        "costEstimate": { "$ref": "#/definitions/CostEstimate" }
+      },
+      "additionalProperties": false
+    },
+    "DiagramPosition": {
+      "type": "object",
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "width": { "type": "number", "minimum": 0 },
+        "height": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "CostEstimate": {
+      "type": "object",
+      "required": ["monthlyUsd", "breakdown", "assumptions"],
+      "properties": {
+        "monthlyUsd": { "type": "number", "minimum": 0 },
+        "breakdown": { "type": "array", "items": { "$ref": "#/definitions/CostBreakdownItem" } },
+        "assumptions": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "CostBreakdownItem": {
+      "type": "object",
+      "required": ["dimension", "quantity", "unit", "unitPriceUsd", "monthlyUsd"],
+      "properties": {
+        "dimension": { "type": "string" },
+        "quantity": { "type": "number", "minimum": 0 },
+        "unit": { "type": "string" },
+        "unitPriceUsd": { "type": "number", "minimum": 0 },
+        "monthlyUsd": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "Connection": {
+      "type": "object",
+      "required": ["id", "sourceId", "targetId", "type"],
+      "properties": {
+        "id": { "type": "string" },
+        "sourceId": { "type": "string" },
+        "targetId": { "type": "string" },
+        "type": { "type": "string", "enum": ["data-flow", "network", "trigger", "dependency", "iam"] },
+        "label": { "type": "string" },
+        "protocol": { "type": "string" },
+        "port": { "type": "integer", "minimum": 0, "maximum": 65535 }
+      },
+      "additionalProperties": false
+    },
+    "SecurityGroup": {
+      "type": "object",
+      "required": ["id", "name", "description", "ingressRules", "egressRules"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "ingressRules": { "type": "array", "items": { "$ref": "#/definitions/SecurityGroupRule" } },
+        "egressRules": { "type": "array", "items": { "$ref": "#/definitions/SecurityGroupRule" } }
+      },
+      "additionalProperties": false
+    },
+    "SecurityGroupRule": {
+      "type": "object",
+      "required": ["protocol", "fromPort", "toPort", "source", "description"],
+      "properties": {
+        "protocol": { "type": "string", "enum": ["tcp", "udp", "icmp", "-1"] },
+        "fromPort": { "type": "integer" },
+        "toPort": { "type": "integer" },
+        "source": { "type": "string" },
+        "description": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "IamRole": {
+      "type": "object",
+      "required": ["id", "name", "resourceId", "policies"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "resourceId": { "type": "string" },
+        "policies": { "type": "array", "items": { "$ref": "#/definitions/IamPolicy" } }
+      },
+      "additionalProperties": false
+    },
+    "IamPolicy": {
+      "type": "object",
+      "required": ["effect", "actions", "resources"],
+      "properties": {
+        "effect": { "type": "string", "enum": ["Allow", "Deny"] },
+        "actions": { "type": "array", "items": { "type": "string" } },
+        "resources": { "type": "array", "items": { "type": "string" } },
+        "conditions": { "type": "object", "additionalProperties": { "type": "object", "additionalProperties": { "type": "string" } } }
+      },
+      "additionalProperties": false
+    },
+    "ServiceType": {
+      "type": "string",
+      "enum": [
+        "lambda", "api-gateway", "api-gateway-websocket", "dynamodb", "s3",
+        "cloudfront", "cognito", "sqs", "sns", "step-functions", "eventbridge",
+        "kinesis", "rds-aurora-serverless", "elasticache", "ecs-fargate", "ecr",
+        "cloudwatch", "cloudtrail", "waf", "secrets-manager", "kms"
+      ]
+    },
+    "AwsRegion": {
+      "type": "string",
+      "enum": ["us-east-1", "us-west-2", "eu-west-1", "eu-central-1", "ap-southeast-1", "ap-northeast-1"]
+    }
+  }
+}
