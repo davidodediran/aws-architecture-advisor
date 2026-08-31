@@ -1,3 +1,8 @@
+/**
+ * Architecture Model — the single source of truth.
+ * Diagram, CFN template, cost estimate, and WA review all read from this object.
+ */
+
 export interface ArchitectureModel {
   schemaVersion: '1.0';
   metadata: ModelMetadata;
@@ -103,7 +108,12 @@ export interface Connection {
   port?: number;
 }
 
-export type ConnectionType = 'data-flow' | 'network' | 'trigger' | 'dependency' | 'iam';
+export type ConnectionType =
+  | 'data-flow'
+  | 'network'
+  | 'trigger'
+  | 'dependency'
+  | 'iam';
 
 export interface SecurityGroup {
   id: string;
@@ -136,11 +146,32 @@ export interface IamPolicy {
 }
 
 export type ServiceType =
-  | 'lambda' | 'api-gateway' | 'api-gateway-websocket' | 'dynamodb' | 's3'
-  | 'cloudfront' | 'cognito' | 'sqs' | 'sns' | 'step-functions' | 'eventbridge'
-  | 'kinesis' | 'rds-aurora-serverless' | 'elasticache' | 'ecs-fargate' | 'ecr'
-  | 'cloudwatch' | 'cloudtrail' | 'waf' | 'secrets-manager' | 'kms';
+  | 'lambda'
+  | 'api-gateway'
+  | 'api-gateway-websocket'
+  | 'dynamodb'
+  | 's3'
+  | 'cloudfront'
+  | 'cognito'
+  | 'sqs'
+  | 'sns'
+  | 'step-functions'
+  | 'eventbridge'
+  | 'kinesis'
+  | 'rds-aurora-serverless'
+  | 'elasticache'
+  | 'ecs-fargate'
+  | 'ecr'
+  | 'cloudwatch'
+  | 'cloudtrail'
+  | 'waf'
+  | 'secrets-manager'
+  | 'kms';
 
 export type AwsRegion =
-  | 'us-east-1' | 'us-west-2' | 'eu-west-1' | 'eu-central-1'
-  | 'ap-southeast-1' | 'ap-northeast-1';
+  | 'us-east-1'
+  | 'us-west-2'
+  | 'eu-west-1'
+  | 'eu-central-1'
+  | 'ap-southeast-1'
+  | 'ap-northeast-1';
