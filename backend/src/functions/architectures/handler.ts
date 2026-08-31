@@ -22,7 +22,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
   }
 }
 
-async function getArchitecture(userId: string, projectId: string): Promise<APIGatewayProxyResult> {
+async function getArchitecture(_userId: string, projectId: string): Promise<APIGatewayProxyResult> {
   // TODO: Get latest architecture version from DynamoDB
   // TODO: Load architecture model JSON from S3 or inline
   // TODO: Verify ownership
@@ -30,7 +30,7 @@ async function getArchitecture(userId: string, projectId: string): Promise<APIGa
   return notFound(`Architecture not found for project ${projectId}`);
 }
 
-async function generateCfn(userId: string, projectId: string): Promise<APIGatewayProxyResult> {
+async function generateCfn(_userId: string, projectId: string): Promise<APIGatewayProxyResult> {
   // TODO: Load architecture model
   // TODO: Run deterministic CFN generation (code transforms, NOT LLM)
   // TODO: Apply naming prefix from model metadata
@@ -57,7 +57,7 @@ async function generateCfn(userId: string, projectId: string): Promise<APIGatewa
   });
 }
 
-async function validateArchitecture(userId: string, projectId: string): Promise<APIGatewayProxyResult> {
+async function validateArchitecture(_userId: string, projectId: string): Promise<APIGatewayProxyResult> {
   // TODO: Load architecture model
   // TODO: Run structural validation (resource limits, connection integrity)
   // TODO: Run security validation (SG rules, IAM policies)
@@ -66,7 +66,7 @@ async function validateArchitecture(userId: string, projectId: string): Promise<
   return ok({ projectId, valid: true, findings: [] });
 }
 
-async function getWaReview(userId: string, projectId: string): Promise<APIGatewayProxyResult> {
+async function getWaReview(_userId: string, projectId: string): Promise<APIGatewayProxyResult> {
   // TODO: Load architecture model
   // TODO: Run rule engine checks (deterministic WA rules)
   // TODO: Query Bedrock Knowledge Base (RAG over WA Framework docs)

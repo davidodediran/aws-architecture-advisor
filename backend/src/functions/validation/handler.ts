@@ -17,7 +17,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
   }
 }
 
-async function getUploadUrl(userId: string, body: string | null): Promise<APIGatewayProxyResult> {
+async function getUploadUrl(_userId: string, body: string | null): Promise<APIGatewayProxyResult> {
   if (!body) return badRequest('Request body is required');
 
   // TODO: Parse body with Zod (GetUploadUrlRequest)
@@ -37,7 +37,7 @@ async function getUploadUrl(userId: string, body: string | null): Promise<APIGat
   });
 }
 
-async function exportPortfolio(userId: string): Promise<APIGatewayProxyResult> {
+async function exportPortfolio(_userId: string): Promise<APIGatewayProxyResult> {
   // TODO: Query all user's projects from DynamoDB
   // TODO: For each project, collect:
   //   - Architecture model JSON
