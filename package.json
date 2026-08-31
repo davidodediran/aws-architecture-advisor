@@ -2,6 +2,9 @@
   "name": "aws-architecture-advisor",
   "version": "0.1.0",
   "private": true,
+  "description": "AI-Powered AWS Architecture Advisor & Deployment Platform",
+  "author": "David Odediran <david.odediran@amalitechtraining.org>",
+  "license": "MIT",
   "workspaces": [
     "frontend",
     "backend",
