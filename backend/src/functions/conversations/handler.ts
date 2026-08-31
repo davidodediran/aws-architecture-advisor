@@ -17,7 +17,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
   }
 }
 
-async function sendMessage(userId: string, body: string | null): Promise<APIGatewayProxyResult> {
+async function sendMessage(_userId: string, body: string | null): Promise<APIGatewayProxyResult> {
   if (!body) return badRequest('Request body is required');
 
   // TODO: Parse body with Zod (SendMessageRequest)
@@ -41,7 +41,7 @@ async function sendMessage(userId: string, body: string | null): Promise<APIGate
   });
 }
 
-async function getConversation(userId: string, projectId: string): Promise<APIGatewayProxyResult> {
+async function getConversation(_userId: string, projectId: string): Promise<APIGatewayProxyResult> {
   // TODO: Query conversation from DynamoDB by projectId
   // TODO: Verify ownership
 

@@ -18,7 +18,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
   }
 }
 
-async function requestDeployment(userId: string, body: string | null): Promise<APIGatewayProxyResult> {
+async function requestDeployment(_userId: string, body: string | null): Promise<APIGatewayProxyResult> {
   if (!body) return badRequest('Request body is required');
 
   // TODO: Parse body with Zod (RequestDeploymentRequest)
@@ -45,7 +45,7 @@ async function requestDeployment(userId: string, body: string | null): Promise<A
   });
 }
 
-async function getDeploymentStatus(userId: string, deploymentId: string): Promise<APIGatewayProxyResult> {
+async function getDeploymentStatus(_userId: string, deploymentId: string): Promise<APIGatewayProxyResult> {
   // TODO: Get deployment record from DynamoDB
   // TODO: If status is 'creating', check CloudFormation stack status
   // TODO: Fetch recent stack events
@@ -54,7 +54,7 @@ async function getDeploymentStatus(userId: string, deploymentId: string): Promis
   return notFound(`Deployment ${deploymentId} not found`);
 }
 
-async function deleteStack(userId: string, deploymentId: string): Promise<APIGatewayProxyResult> {
+async function deleteStack(_userId: string, deploymentId: string): Promise<APIGatewayProxyResult> {
   // TODO: Get deployment record
   // TODO: Verify ownership
   // TODO: STS AssumeRole to student's account

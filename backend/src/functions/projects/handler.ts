@@ -19,7 +19,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
   }
 }
 
-async function createProject(userId: string, body: string | null): Promise<APIGatewayProxyResult> {
+async function createProject(_userId: string, body: string | null): Promise<APIGatewayProxyResult> {
   if (!body) return badRequest('Request body is required');
 
   // TODO: Parse body with Zod
@@ -31,21 +31,21 @@ async function createProject(userId: string, body: string | null): Promise<APIGa
   return created({ projectId: 'placeholder', name: 'placeholder', status: 'designing', createdAt: new Date().toISOString() });
 }
 
-async function listProjects(userId: string): Promise<APIGatewayProxyResult> {
+async function listProjects(_userId: string): Promise<APIGatewayProxyResult> {
   // TODO: Query DynamoDB projects table by userId
   // TODO: Support pagination with nextToken
 
   return ok({ projects: [], nextToken: undefined });
 }
 
-async function getProject(userId: string, projectId: string): Promise<APIGatewayProxyResult> {
+async function getProject(_userId: string, projectId: string): Promise<APIGatewayProxyResult> {
   // TODO: Get item from DynamoDB projects table
   // TODO: Verify ownership (userId matches)
 
   return notFound(`Project ${projectId} not found`);
 }
 
-async function deleteProject(userId: string, projectId: string): Promise<APIGatewayProxyResult> {
+async function deleteProject(_userId: string, projectId: string): Promise<APIGatewayProxyResult> {
   // TODO: Verify ownership
   // TODO: Check no active deployments
   // TODO: Soft-delete (set status to 'deleted')

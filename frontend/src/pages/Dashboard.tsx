@@ -10,7 +10,7 @@ interface Project {
 }
 
 export default function Dashboard() {
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [projects, _setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
