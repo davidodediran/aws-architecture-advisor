@@ -1,11 +1,12 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { extractAuth } from '../../middleware/auth';
-import { ok, badRequest, serverError } from '../../middleware/api-response';
+import { ok, badRequest, unauthorized, serverError } from '../../middleware/api-response';
 import { LIMITS } from '@aws-arch-advisor/shared';
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   try {
     const auth = extractAuth(event);
+    if (!auth) return unauthorized();
     const path = event.resource;
 
     if (path.includes('upload-url')) return getUploadUrl(auth.userId, event.body);

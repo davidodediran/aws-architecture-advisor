@@ -1,6 +1,6 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult, APIGatewayRequestAuthorizerEvent, APIGatewayAuthorizerResult } from 'aws-lambda';
 import { extractAuth, isTrainer } from '../../middleware/auth';
-import { ok, badRequest, forbidden, serverError } from '../../middleware/api-response';
+import { ok, badRequest, forbidden, unauthorized, serverError } from '../../middleware/api-response';
 
 export async function authorizer(event: APIGatewayRequestAuthorizerEvent): Promise<APIGatewayAuthorizerResult> {
   // TODO: Extract JWT from Authorization header
@@ -22,6 +22,7 @@ export async function authorizer(event: APIGatewayRequestAuthorizerEvent): Promi
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   try {
     const auth = extractAuth(event);
+    if (!auth) return unauthorized();
     const path = event.resource;
 
     if (path.includes('trainer-unlock')) return trainerUnlock(auth, event.body);

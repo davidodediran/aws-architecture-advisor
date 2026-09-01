@@ -8,16 +8,32 @@ const client = new BedrockRuntimeClient({});
 const MODEL_ID = process.env.BEDROCK_MODEL_ID ?? 'anthropic.claude-3-sonnet-20240229-v1:0';
 const MAX_RETRIES = 3;
 
-function buildBody(prompt: string, systemPrompt?: string, maxTokens = 4096): string {
+interface MessagesInput {
+  systemPrompt: string;
+  messages: { role: string; content: string }[];
+  maxTokens?: number;
+}
+
+type ModelInput = string | MessagesInput;
+
+function buildBody(input: ModelInput, systemPrompt?: string, maxTokens = 4096): string {
+  if (typeof input === 'string') {
+    return JSON.stringify({
+      anthropic_version: 'bedrock-2023-05-31',
+      max_tokens: maxTokens,
+      system: systemPrompt ?? '',
+      messages: [{ role: 'user', content: input }],
+    });
+  }
   return JSON.stringify({
     anthropic_version: 'bedrock-2023-05-31',
-    max_tokens: maxTokens,
-    system: systemPrompt ?? '',
-    messages: [{ role: 'user', content: prompt }],
+    max_tokens: input.maxTokens ?? maxTokens,
+    system: input.systemPrompt,
+    messages: input.messages,
   });
 }
 
-export async function invokeModel(prompt: string, systemPrompt?: string, maxTokens = 4096): Promise<string> {
+export async function invokeModel(input: ModelInput, systemPrompt?: string, maxTokens = 4096): Promise<string> {
   let lastError: Error | null = null;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
@@ -27,7 +43,7 @@ export async function invokeModel(prompt: string, systemPrompt?: string, maxToke
           modelId: MODEL_ID,
           contentType: 'application/json',
           accept: 'application/json',
-          body: buildBody(prompt, systemPrompt, maxTokens),
+          body: buildBody(input, systemPrompt, maxTokens),
         }),
       );
 
@@ -47,7 +63,7 @@ export async function invokeModel(prompt: string, systemPrompt?: string, maxToke
 }
 
 export async function* invokeModelStream(
-  prompt: string,
+  input: ModelInput,
   systemPrompt?: string,
   maxTokens = 4096,
 ): AsyncGenerator<string, void, undefined> {
@@ -56,7 +72,7 @@ export async function* invokeModelStream(
       modelId: MODEL_ID,
       contentType: 'application/json',
       accept: 'application/json',
-      body: buildBody(prompt, systemPrompt, maxTokens),
+      body: buildBody(input, systemPrompt, maxTokens),
     }),
   );
 
