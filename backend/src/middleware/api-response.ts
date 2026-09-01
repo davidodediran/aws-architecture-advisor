@@ -2,15 +2,19 @@ import type { APIGatewayProxyResult } from 'aws-lambda';
 
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN ?? '*';
 
-const corsHeaders = {
+const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
   'Access-Control-Allow-Headers': 'Content-Type,Authorization',
   'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
   'Content-Type': 'application/json',
 };
 
-function response(statusCode: number, body: unknown): APIGatewayProxyResult {
-  return { statusCode, headers: corsHeaders, body: JSON.stringify(body) };
+function response(statusCode: number, body: unknown, extraHeaders?: Record<string, string>): APIGatewayProxyResult {
+  return {
+    statusCode,
+    headers: { ...corsHeaders, ...extraHeaders },
+    body: JSON.stringify(body),
+  };
 }
 
 export function ok(body: unknown): APIGatewayProxyResult {
@@ -22,7 +26,7 @@ export function created(body: unknown): APIGatewayProxyResult {
 }
 
 export function badRequest(message: string, details?: Record<string, unknown>): APIGatewayProxyResult {
-  return response(400, { code: 'BAD_REQUEST', message, details });
+  return response(400, { code: 'BAD_REQUEST', message, ...(details && { details }) });
 }
 
 export function notFound(message: string): APIGatewayProxyResult {
@@ -34,9 +38,9 @@ export function forbidden(message: string): APIGatewayProxyResult {
 }
 
 export function tooManyRequests(): APIGatewayProxyResult {
-  return response(429, { code: 'TOO_MANY_REQUESTS', message: 'Rate limit exceeded. Please try again later.' });
+  return response(429, { code: 'TOO_MANY_REQUESTS', message: 'Rate limit exceeded. Please try again later.' }, { 'Retry-After': '60' });
 }
 
-export function serverError(): APIGatewayProxyResult {
-  return response(500, { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred.' });
+export function serverError(message = 'Internal server error'): APIGatewayProxyResult {
+  return response(500, { code: 'INTERNAL_ERROR', message });
 }
