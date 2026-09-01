@@ -33,6 +33,10 @@ export function notFound(message: string): APIGatewayProxyResult {
   return response(404, { code: 'NOT_FOUND', message });
 }
 
+export function unauthorized(message = 'Authentication required'): APIGatewayProxyResult {
+  return response(401, { code: 'UNAUTHORIZED', message });
+}
+
 export function forbidden(message: string): APIGatewayProxyResult {
   return response(403, { code: 'FORBIDDEN', message });
 }
