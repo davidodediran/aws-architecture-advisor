@@ -1,7 +1,23 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { extractAuth } from '../../middleware/auth';
 import { ok, badRequest, serverError } from '../../middleware/api-response';
-import { LIMITS } from '@aws-arch-advisor/shared';
+import { queryItems } from '../../services/dynamo-client';
+import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+
+const TEMPLATES_BUCKET = process.env.TEMPLATES_BUCKET!;
+const PROJECTS_TABLE = process.env.PROJECTS_TABLE!;
+
+const s3 = new S3Client({});
+
+const ALLOWED_CONTENT_TYPES = [
+  'application/json',
+  'application/yaml',
+  'text/yaml',
+  'text/plain',
+  'image/png',
+  'image/svg+xml',
+];
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   try {
@@ -12,47 +28,78 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     if (path.includes('export-portfolio')) return exportPortfolio(auth.userId);
 
     return badRequest('Unsupported endpoint');
-  } catch {
+  } catch (err) {
+    console.error('Validation handler error:', err);
     return serverError();
   }
 }
 
-async function getUploadUrl(_userId: string, body: string | null): Promise<APIGatewayProxyResult> {
-  if (!body) return badRequest('Request body is required');
-
-  // TODO: Parse body with Zod (GetUploadUrlRequest)
-  // TODO: Validate MIME type against LIMITS.UPLOAD_ALLOWED_MIME_TYPES
-  // TODO: Generate S3 key: uploads/{userId}/{projectId}/{ulid}/{filename}
-  // TODO: Create presigned PUT URL with:
-  //   - Content-Type condition
-  //   - Content-Length max: LIMITS.MAX_UPLOAD_SIZE_BYTES
-  //   - Content-Disposition: attachment
-  //   - Expiry: LIMITS.UPLOAD_PRESIGNED_URL_EXPIRY_SECONDS
-  // TODO: Return upload URL and key
-
-  return ok({
-    uploadUrl: '',
-    key: '',
-    expiresIn: LIMITS.UPLOAD_PRESIGNED_URL_EXPIRY_SECONDS,
-  });
+function sanitizeFilename(filename: string): string {
+  return filename
+    .replace(/[^a-zA-Z0-9._-]/g, '_')
+    .replace(/\.{2,}/g, '.')
+    .slice(0, 255);
 }
 
-async function exportPortfolio(_userId: string): Promise<APIGatewayProxyResult> {
-  // TODO: Query all user's projects from DynamoDB
-  // TODO: For each project, collect:
-  //   - Architecture model JSON
-  //   - Diagram SVG/PNG
-  //   - CFN template YAML
-  //   - WA review summary
-  //   - Cost estimate
-  // TODO: Package as ZIP archive
-  // TODO: Upload ZIP to S3
-  // TODO: Generate presigned GET URL
-  // TODO: Log audit event
+async function getUploadUrl(userId: string, body: string | null): Promise<APIGatewayProxyResult> {
+  if (!body) return badRequest('Request body is required');
 
-  return ok({
-    downloadUrl: '',
-    expiresIn: 3600,
-    contents: [],
+  const parsed = JSON.parse(body);
+  const { filename, contentType, projectId } = parsed;
+
+  if (!filename || !contentType || !projectId) {
+    return badRequest('filename, contentType, and projectId are required');
+  }
+
+  if (!ALLOWED_CONTENT_TYPES.includes(contentType)) {
+    return badRequest(`Content type not allowed. Allowed: ${ALLOWED_CONTENT_TYPES.join(', ')}`);
+  }
+
+  const sanitized = sanitizeFilename(filename);
+  const key = `uploads/${userId}/${projectId}/${Date.now()}-${sanitized}`;
+
+  const command = new PutObjectCommand({
+    Bucket: TEMPLATES_BUCKET,
+    Key: key,
+    ContentType: contentType,
   });
+
+  const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 300 });
+
+  return ok({ uploadUrl, key, expiresIn: 300 });
+}
+
+async function exportPortfolio(userId: string): Promise<APIGatewayProxyResult> {
+  const projects = await queryItems<Record<string, unknown>>(
+    PROJECTS_TABLE,
+    'pk = :pk',
+    { ':pk': `USER#${userId}` },
+  );
+
+  const manifest = {
+    exportedAt: new Date().toISOString(),
+    userId,
+    projectCount: projects.length,
+    projects: projects.map((p) => ({
+      projectId: p.projectId,
+      name: p.name,
+      status: p.status,
+    })),
+  };
+
+  const manifestKey = `exports/${userId}/portfolio-${Date.now()}.json`;
+  await s3.send(new PutObjectCommand({
+    Bucket: TEMPLATES_BUCKET,
+    Key: manifestKey,
+    Body: JSON.stringify(manifest, null, 2),
+    ContentType: 'application/json',
+  }));
+
+  const downloadUrl = await getSignedUrl(
+    s3,
+    new GetObjectCommand({ Bucket: TEMPLATES_BUCKET, Key: manifestKey }),
+    { expiresIn: 3600 },
+  );
+
+  return ok({ downloadUrl, expiresIn: 3600 });
 }
