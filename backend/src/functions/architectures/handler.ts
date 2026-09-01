@@ -1,6 +1,23 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { extractAuth } from '../../middleware/auth';
 import { ok, badRequest, notFound, serverError } from '../../middleware/api-response';
+import { queryItems } from '../../services/dynamo-client';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { retrieveContext, formatContextForPrompt } from '../../services/knowledge-base';
+import type { ArchitectureModel } from '@aws-arch-advisor/shared';
+
+const ARCHITECTURES_TABLE = process.env.ARCHITECTURE_VERSIONS_TABLE!;
+const TEMPLATES_BUCKET = process.env.TEMPLATES_BUCKET!;
+
+const s3 = new S3Client({});
+
+interface ArchitectureVersionRecord {
+  pk: string;
+  sk: string;
+  versionId: string;
+  architecture: ArchitectureModel;
+  createdAt: string;
+}
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   try {
@@ -17,69 +34,83 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     if (method === 'GET' && path.includes('wa-review')) return getWaReview(auth.userId, projectId);
 
     return badRequest('Unsupported method');
-  } catch {
+  } catch (err) {
+    console.error('Architectures handler error:', err);
     return serverError();
   }
 }
 
-async function getArchitecture(_userId: string, projectId: string): Promise<APIGatewayProxyResult> {
-  // TODO: Get latest architecture version from DynamoDB
-  // TODO: Load architecture model JSON from S3 or inline
-  // TODO: Verify ownership
-
-  return notFound(`Architecture not found for project ${projectId}`);
+async function loadLatestArchitecture(projectId: string): Promise<ArchitectureVersionRecord | null> {
+  const versions = await queryItems<ArchitectureVersionRecord>(
+    ARCHITECTURES_TABLE,
+    'pk = :pk',
+    { ':pk': `PROJECT#${projectId}` },
+    { scanForward: false, limit: 1 },
+  );
+  return versions[0] ?? null;
 }
 
-async function generateCfn(_userId: string, projectId: string): Promise<APIGatewayProxyResult> {
-  // TODO: Load architecture model
-  // TODO: Run deterministic CFN generation (code transforms, NOT LLM)
-  // TODO: Apply naming prefix from model metadata
-  // TODO: Validate through 4 layers:
-  //   1. cfn-lint (syntax/best practices)
-  //   2. cfn-nag (security scanning)
-  //   3. AWS ValidateTemplate API
-  //   4. Custom rules (Block Public Access, least-privilege IAM)
-  // TODO: Upload template to S3
-  // TODO: Save validation results
+async function getArchitecture(_userId: string, projectId: string): Promise<APIGatewayProxyResult> {
+  const version = await loadLatestArchitecture(projectId);
+  if (!version) return notFound(`Architecture not found for project ${projectId}`);
 
   return ok({
     projectId,
-    version: 1,
-    templateYaml: '',
-    templateS3Key: '',
-    validationResults: {
-      cfnLint: { status: 'passed', findings: [] },
-      cfnNag: { status: 'passed', findings: [] },
-      awsValidate: { status: 'passed', findings: [] },
-      overallStatus: 'passed',
-    },
-    namingPrefix: '',
+    versionId: version.versionId,
+    architecture: version.architecture,
+    createdAt: version.createdAt,
+  });
+}
+
+async function generateCfn(_userId: string, projectId: string): Promise<APIGatewayProxyResult> {
+  const version = await loadLatestArchitecture(projectId);
+  if (!version) return notFound(`Architecture not found for project ${projectId}`);
+
+  const { generateTemplate } = await import('../../services/cfn-generator');
+  const { validateTemplate } = await import('../../services/cfn-validator');
+
+  const template = generateTemplate(version.architecture);
+  const validation = await validateTemplate(template);
+
+  const s3Key = `cfn/${projectId}/${version.versionId}/template.yaml`;
+  await s3.send(new PutObjectCommand({
+    Bucket: TEMPLATES_BUCKET,
+    Key: s3Key,
+    Body: template,
+    ContentType: 'application/x-yaml',
+  }));
+
+  return ok({
+    template,
+    validation,
+    s3Key,
   });
 }
 
 async function validateArchitecture(_userId: string, projectId: string): Promise<APIGatewayProxyResult> {
-  // TODO: Load architecture model
-  // TODO: Run structural validation (resource limits, connection integrity)
-  // TODO: Run security validation (SG rules, IAM policies)
-  // TODO: Return validation findings
+  const version = await loadLatestArchitecture(projectId);
+  if (!version) return notFound(`Architecture not found for project ${projectId}`);
 
-  return ok({ projectId, valid: true, findings: [] });
+  const { validateTemplate } = await import('../../services/cfn-validator');
+  const { generateTemplate } = await import('../../services/cfn-generator');
+
+  const template = generateTemplate(version.architecture);
+  const result = await validateTemplate(template);
+
+  return ok(result);
 }
 
 async function getWaReview(_userId: string, projectId: string): Promise<APIGatewayProxyResult> {
-  // TODO: Load architecture model
-  // TODO: Run rule engine checks (deterministic WA rules)
-  // TODO: Query Bedrock Knowledge Base (RAG over WA Framework docs)
-  // TODO: Merge and deduplicate findings
-  // TODO: Score each pillar
-  // TODO: Return review with cited recommendations
+  const version = await loadLatestArchitecture(projectId);
+  if (!version) return notFound(`Architecture not found for project ${projectId}`);
 
-  return ok({
-    projectId,
-    version: 1,
-    pillars: [],
-    overallScore: 0,
-    ruleEngineFindings: [],
-    ragFindings: [],
-  });
+  const ragContexts = await retrieveContext(
+    `Well-Architected review for architecture with resources: ${version.architecture.resources.map((r) => r.type).join(', ')}`,
+  );
+  const ragPrompt = formatContextForPrompt(ragContexts);
+
+  const { reviewArchitecture } = await import('../../services/wa-reviewer');
+  const result = await reviewArchitecture(version.architecture, ragPrompt);
+
+  return ok(result);
 }

@@ -2,124 +2,123 @@ AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: AWS Architecture Advisor - Serverless Backend
 
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+  AllowedOrigin:
+    Type: String
+    Default: 'http://localhost:3000'
+    Description: Allowed origin for CORS headers
+
 Globals:
   Function:
     Runtime: nodejs20.x
+    Timeout: 30
+    MemorySize: 256
     Architectures:
       - arm64
-    MemorySize: 256
-    Timeout: 30
     Environment:
       Variables:
-        STAGE: !Ref Stage
+        ALLOWED_ORIGIN: !Ref AllowedOrigin
         PROJECTS_TABLE: !Ref ProjectsTable
         CONVERSATIONS_TABLE: !Ref ConversationsTable
+        ARCHITECTURES_TABLE: !Ref ArchitecturesTable
         ARCHITECTURE_VERSIONS_TABLE: !Ref ArchitectureVersionsTable
-        DEPLOYMENTS_TABLE: !Ref DeploymentsTable
-        AUDIT_LOG_TABLE: !Ref AuditLogTable
         USER_QUOTA_TABLE: !Ref UserQuotaTable
-        PRICE_CACHE_TABLE: !Ref PriceCacheTable
-        UPLOADS_BUCKET: !Ref UploadsBucket
+        DEPLOYMENTS_TABLE: !Ref DeploymentsTable
+        PRICING_CACHE_TABLE: !Ref PricingCacheTable
         TEMPLATES_BUCKET: !Ref TemplatesBucket
-        ALLOWED_ORIGIN: !Sub 'https://${CloudFrontDomain}'
-
-Parameters:
-  Stage:
-    Type: String
-    Default: dev
-    AllowedValues: [dev, staging, prod]
-  CloudFrontDomain:
-    Type: String
-    Default: localhost:3000
-    Description: CloudFront distribution domain for CORS
 
 Resources:
-  # --- API Gateway ---
+  # ============================================================
+  # API Gateway
+  # ============================================================
   ApiGateway:
     Type: AWS::Serverless::Api
     Properties:
-      Name: !Sub 'aws-arch-advisor-${Stage}'
-      StageName: !Ref Stage
+      Name: !Sub 'aws-arch-advisor-${Environment}'
+      StageName: !Ref Environment
       Cors:
         AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
         AllowHeaders: "'Content-Type,Authorization'"
-        AllowOrigin: !Sub "'https://${CloudFrontDomain}'"
+        AllowOrigin: !Sub "'${AllowedOrigin}'"
       Auth:
         DefaultAuthorizer: CognitoAuthorizer
         Authorizers:
           CognitoAuthorizer:
             UserPoolArn: !GetAtt CognitoUserPool.Arn
 
-  # --- Lambda Functions ---
+  # ============================================================
+  # Lambda Functions
+  # ============================================================
   ProjectsFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub 'aws-arch-advisor-projects-${Stage}'
-      Handler: dist/functions/projects/handler.handler
+      FunctionName: !Sub 'arch-advisor-projects-${Environment}'
+      Handler: src/functions/projects/handler.handler
       Events:
         CreateProject:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGateway
-            Path: /api/projects
+            Path: /projects
             Method: POST
         ListProjects:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGateway
-            Path: /api/projects
+            Path: /projects
             Method: GET
         GetProject:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGateway
-            Path: /api/projects/{projectId}
+            Path: /projects/{projectId}
             Method: GET
         DeleteProject:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGateway
-            Path: /api/projects/{projectId}
+            Path: /projects/{projectId}
             Method: DELETE
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ProjectsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref UserQuotaTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref AuditLogTable
 
   ConversationsFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub 'aws-arch-advisor-conversations-${Stage}'
-      Handler: dist/functions/conversations/handler.handler
-      Timeout: 60
+      FunctionName: !Sub 'arch-advisor-conversations-${Environment}'
+      Handler: src/functions/conversations/handler.handler
+      Timeout: 90
       MemorySize: 512
       Events:
         SendMessage:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGateway
-            Path: /api/conversations
+            Path: /conversations/{projectId}/messages
             Method: POST
         GetConversation:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGateway
-            Path: /api/conversations/{projectId}
+            Path: /conversations/{projectId}
             Method: GET
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ConversationsTable
         - DynamoDBCrudPolicy:
-            TableName: !Ref ProjectsTable
+            TableName: !Ref ArchitecturesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ArchitectureVersionsTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref UserQuotaTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref AuditLogTable
         - Statement:
             - Effect: Allow
               Action:
@@ -135,39 +134,39 @@ Resources:
   ArchitecturesFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub 'aws-arch-advisor-architectures-${Stage}'
-      Handler: dist/functions/architectures/handler.handler
+      FunctionName: !Sub 'arch-advisor-architectures-${Environment}'
+      Handler: src/functions/architectures/handler.handler
       Timeout: 60
       Events:
         GetArchitecture:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGateway
-            Path: /api/projects/{projectId}/architecture
+            Path: /projects/{projectId}/architecture
             Method: GET
         GenerateCfn:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGateway
-            Path: /api/projects/{projectId}/generate-cfn
+            Path: /projects/{projectId}/architecture/generate-cfn
             Method: POST
         ValidateArchitecture:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGateway
-            Path: /api/projects/{projectId}/validate
+            Path: /projects/{projectId}/architecture/validate
             Method: POST
         WaReview:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGateway
-            Path: /api/projects/{projectId}/wa-review
+            Path: /projects/{projectId}/architecture/wa-review
             Method: GET
       Policies:
         - DynamoDBCrudPolicy:
-            TableName: !Ref ArchitectureVersionsTable
+            TableName: !Ref ArchitecturesTable
         - DynamoDBCrudPolicy:
-            TableName: !Ref ProjectsTable
+            TableName: !Ref ArchitectureVersionsTable
         - S3CrudPolicy:
             BucketName: !Ref TemplatesBucket
         - Statement:
@@ -184,39 +183,37 @@ Resources:
   DeploymentsFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub 'aws-arch-advisor-deployments-${Stage}'
-      Handler: dist/functions/deployments/handler.handler
+      FunctionName: !Sub 'arch-advisor-deployments-${Environment}'
+      Handler: src/functions/deployments/handler.handler
       Timeout: 60
       Events:
         RequestDeployment:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGateway
-            Path: /api/deployments
+            Path: /projects/{projectId}/deploy
             Method: POST
         GetDeploymentStatus:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGateway
-            Path: /api/deployments/{deploymentId}
+            Path: /projects/{projectId}/deploy/status
             Method: GET
-        DeleteStack:
+        DeleteDeployment:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGateway
-            Path: /api/deployments/{deploymentId}
+            Path: /projects/{projectId}/deploy
             Method: DELETE
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref DeploymentsTable
         - DynamoDBCrudPolicy:
-            TableName: !Ref ProjectsTable
-        - DynamoDBCrudPolicy:
             TableName: !Ref ArchitectureVersionsTable
         - DynamoDBCrudPolicy:
-            TableName: !Ref PriceCacheTable
+            TableName: !Ref UserQuotaTable
         - DynamoDBCrudPolicy:
-            TableName: !Ref AuditLogTable
+            TableName: !Ref PricingCacheTable
         - S3ReadPolicy:
             BucketName: !Ref TemplatesBucket
         - Statement:
@@ -227,30 +224,38 @@ Resources:
         - Statement:
             - Effect: Allow
               Action:
+                - cloudformation:CreateStack
+                - cloudformation:DeleteStack
+                - cloudformation:DescribeStacks
+                - cloudformation:DescribeStackEvents
+              Resource: '*'
+        - Statement:
+            - Effect: Allow
+              Action:
                 - pricing:GetProducts
               Resource: '*'
 
   AiFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub 'aws-arch-advisor-ai-${Stage}'
-      Handler: dist/functions/ai/handler.handler
+      FunctionName: !Sub 'arch-advisor-ai-${Environment}'
+      Handler: src/functions/ai/handler.handler
       Events:
         ListTemplates:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGateway
-            Path: /api/templates
+            Path: /ai/templates
             Method: GET
         CostEstimate:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGateway
-            Path: /api/cost-estimate
+            Path: /ai/cost-estimate
             Method: POST
       Policies:
         - DynamoDBCrudPolicy:
-            TableName: !Ref PriceCacheTable
+            TableName: !Ref PricingCacheTable
         - Statement:
             - Effect: Allow
               Action:
@@ -260,35 +265,51 @@ Resources:
   ValidationFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub 'aws-arch-advisor-validation-${Stage}'
-      Handler: dist/functions/validation/handler.handler
+      FunctionName: !Sub 'arch-advisor-validation-${Environment}'
+      Handler: src/functions/validation/handler.handler
       Events:
         GetUploadUrl:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGateway
-            Path: /api/upload-url
+            Path: /validation/upload-url
             Method: POST
         ExportPortfolio:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGateway
-            Path: /api/export-portfolio
+            Path: /validation/export-portfolio
             Method: GET
       Policies:
         - S3CrudPolicy:
-            BucketName: !Ref UploadsBucket
+            BucketName: !Ref TemplatesBucket
         - DynamoDBReadPolicy:
             TableName: !Ref ProjectsTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref AuditLogTable
 
-  # --- DynamoDB Tables ---
+  AuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'arch-advisor-auth-${Environment}'
+      Handler: src/functions/auth/handler.authorizer
+      Events:
+        TrainerUnlock:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /auth/trainer-unlock
+            Method: POST
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserQuotaTable
+
+  # ============================================================
+  # DynamoDB Tables
+  # ============================================================
   ProjectsTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
     Properties:
-      TableName: !Sub 'aws-arch-advisor-projects-${Stage}'
+      TableName: !Sub 'arch-advisor-projects-${Environment}'
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: pk
@@ -307,7 +328,26 @@ Resources:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
     Properties:
-      TableName: !Sub 'aws-arch-advisor-conversations-${Stage}'
+      TableName: !Sub 'arch-advisor-conversations-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  ArchitecturesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    Properties:
+      TableName: !Sub 'arch-advisor-architectures-${Environment}'
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: pk
@@ -326,7 +366,7 @@ Resources:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
     Properties:
-      TableName: !Sub 'aws-arch-advisor-architecture-versions-${Stage}'
+      TableName: !Sub 'arch-advisor-arch-versions-${Environment}'
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: pk
@@ -340,65 +380,12 @@ Resources:
           KeyType: RANGE
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
-
-  DeploymentsTable:
-    Type: AWS::DynamoDB::Table
-    DeletionPolicy: Retain
-    Properties:
-      TableName: !Sub 'aws-arch-advisor-deployments-${Stage}'
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - AttributeName: pk
-          AttributeType: S
-        - AttributeName: sk
-          AttributeType: S
-      KeySchema:
-        - AttributeName: pk
-          KeyType: HASH
-        - AttributeName: sk
-          KeyType: RANGE
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
-
-  AuditLogTable:
-    Type: AWS::DynamoDB::Table
-    DeletionPolicy: Retain
-    Properties:
-      TableName: !Sub 'aws-arch-advisor-audit-log-${Stage}'
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - AttributeName: pk
-          AttributeType: S
-        - AttributeName: sk
-          AttributeType: S
-      KeySchema:
-        - AttributeName: pk
-          KeyType: HASH
-        - AttributeName: sk
-          KeyType: RANGE
 
   UserQuotaTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
     Properties:
-      TableName: !Sub 'aws-arch-advisor-user-quota-${Stage}'
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - AttributeName: pk
-          AttributeType: S
-        - AttributeName: sk
-          AttributeType: S
-      KeySchema:
-        - AttributeName: pk
-          KeyType: HASH
-        - AttributeName: sk
-          KeyType: RANGE
-
-  PriceCacheTable:
-    Type: AWS::DynamoDB::Table
-    DeletionPolicy: Retain
-    Properties:
-      TableName: !Sub 'aws-arch-advisor-price-cache-${Stage}'
+      TableName: !Sub 'arch-advisor-user-quota-${Environment}'
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: pk
@@ -414,32 +401,51 @@ Resources:
         AttributeName: expiresAt
         Enabled: true
 
-  # --- S3 Buckets ---
-  UploadsBucket:
-    Type: AWS::S3::Bucket
+  DeploymentsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
     Properties:
-      BucketName: !Sub 'aws-arch-advisor-uploads-${Stage}-${AWS::AccountId}'
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-      CorsConfiguration:
-        CorsRules:
-          - AllowedHeaders: ['*']
-            AllowedMethods: [PUT]
-            AllowedOrigins:
-              - !Sub 'https://${CloudFrontDomain}'
-            MaxAge: 300
+      TableName: !Sub 'arch-advisor-deployments-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
 
+  PricingCacheTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'arch-advisor-pricing-cache-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+
+  # ============================================================
+  # S3 Buckets
+  # ============================================================
   TemplatesBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub 'aws-arch-advisor-templates-${Stage}-${AWS::AccountId}'
+      BucketName: !Sub 'arch-advisor-templates-${Environment}-${AWS::AccountId}'
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -452,11 +458,26 @@ Resources:
       VersioningConfiguration:
         Status: Enabled
 
-  # --- Cognito ---
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'arch-advisor-frontend-${Environment}-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+
+  # ============================================================
+  # Cognito
+  # ============================================================
   CognitoUserPool:
     Type: AWS::Cognito::UserPool
     Properties:
-      UserPoolName: !Sub 'aws-arch-advisor-${Stage}'
+      UserPoolName: !Sub 'arch-advisor-${Environment}'
       AutoVerifiedAttributes:
         - email
       UsernameAttributes:
@@ -481,7 +502,7 @@ Resources:
   CognitoUserPoolClient:
     Type: AWS::Cognito::UserPoolClient
     Properties:
-      ClientName: !Sub 'aws-arch-advisor-web-${Stage}'
+      ClientName: !Sub 'arch-advisor-web-${Environment}'
       UserPoolId: !Ref CognitoUserPool
       ExplicitAuthFlows:
         - ALLOW_USER_SRP_AUTH
@@ -497,13 +518,22 @@ Resources:
       UserPoolId: !Ref CognitoUserPool
       Description: Trainers who can unlock student accounts and manage cohorts
 
+# ============================================================
+# Outputs
+# ============================================================
 Outputs:
   ApiUrl:
     Description: API Gateway endpoint URL
-    Value: !Sub 'https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/${Stage}'
+    Value: !Sub 'https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
   UserPoolId:
     Description: Cognito User Pool ID
     Value: !Ref CognitoUserPool
   UserPoolClientId:
     Description: Cognito User Pool Client ID
     Value: !Ref CognitoUserPoolClient
+  TemplatesBucketName:
+    Description: S3 bucket for CloudFormation templates
+    Value: !Ref TemplatesBucket
+  FrontendBucketName:
+    Description: S3 bucket for frontend static hosting
+    Value: !Ref FrontendBucket
