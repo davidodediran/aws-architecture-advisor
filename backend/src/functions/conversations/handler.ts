@@ -1,6 +1,16 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { extractAuth } from '../../middleware/auth';
-import { ok, badRequest, unauthorized, serverError } from '../../middleware/api-response';
+import { ok, badRequest, notFound, unauthorized, serverError } from '../../middleware/api-response';
+import { queryItems } from '../../services/dynamo-client';
+import { processMessage, getConversationHistory } from '../../services/conversation-engine';
+
+const ARCHITECTURES_TABLE = process.env.ARCHITECTURE_VERSIONS_TABLE!;
+
+interface ArchitectureVersionRecord {
+  pk: string;
+  sk: string;
+  architecture: import('@aws-arch-advisor/shared').ArchitectureModel;
+}
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   try {
@@ -9,42 +19,45 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     const method = event.httpMethod;
     const projectId = event.pathParameters?.projectId;
 
-    if (method === 'POST') return sendMessage(auth.userId, event.body);
+    if (method === 'POST' && projectId) return sendMessage(auth.userId, projectId, event.body);
     if (method === 'GET' && projectId) return getConversation(auth.userId, projectId);
 
     return badRequest('Unsupported method');
-  } catch {
+  } catch (err) {
+    console.error('Conversations handler error:', err);
     return serverError();
   }
 }
 
-async function sendMessage(_userId: string, body: string | null): Promise<APIGatewayProxyResult> {
+async function sendMessage(userId: string, projectId: string, body: string | null): Promise<APIGatewayProxyResult> {
   if (!body) return badRequest('Request body is required');
 
-  // TODO: Parse body with Zod (SendMessageRequest)
-  // TODO: Verify project ownership
-  // TODO: Check daily Bedrock spend / circuit breaker
-  // TODO: Load conversation history from DynamoDB
-  // TODO: Build Bedrock prompt with system instructions
-  // TODO: Invoke Bedrock (Claude via Converse API)
-  // TODO: Check guardrail response (IP protection)
-  // TODO: Parse architecture model updates from response
-  // TODO: Save conversation turn to DynamoDB
-  // TODO: If architecture updated, save new version
-  // TODO: Return response
+  const parsed = JSON.parse(body);
+  const { message } = parsed;
+  if (!message) return badRequest('message is required');
+
+  const versions = await queryItems<ArchitectureVersionRecord>(
+    ARCHITECTURES_TABLE,
+    'pk = :pk',
+    { ':pk': `PROJECT#${projectId}` },
+    { scanForward: false, limit: 1 },
+  );
+
+  const existingArchitecture = versions[0]?.architecture;
+
+  const result = await processMessage(userId, projectId, message, existingArchitecture);
 
   return ok({
-    conversationId: 'placeholder',
-    response: 'Architecture advisor response placeholder',
-    architectureUpdated: false,
-    guardrailBlocked: false,
-    tokensUsed: 0,
+    response: result.response,
+    architecture: result.architecture,
   });
 }
 
-async function getConversation(_userId: string, projectId: string): Promise<APIGatewayProxyResult> {
-  // TODO: Query conversation from DynamoDB by projectId
-  // TODO: Verify ownership
+async function getConversation(userId: string, projectId: string): Promise<APIGatewayProxyResult> {
+  const history = await getConversationHistory(userId, projectId);
 
-  return ok({ projectId, messages: [], tokenCount: 0 });
+  return ok({
+    projectId,
+    messages: history,
+  });
 }

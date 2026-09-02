@@ -1,67 +1,131 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { extractAuth } from '../../middleware/auth';
-import { ok, badRequest, notFound, unauthorized, serverError } from '../../middleware/api-response';
+import { ok, badRequest, forbidden, notFound, unauthorized, serverError } from '../../middleware/api-response';
+import { getItem, queryItems, updateItem } from '../../services/dynamo-client';
+import type { ArchitectureModel } from '@aws-arch-advisor/shared';
+
+const ARCHITECTURES_TABLE = process.env.ARCHITECTURE_VERSIONS_TABLE!;
+const DEPLOYMENTS_TABLE = process.env.DEPLOYMENTS_TABLE!;
+
+interface ArchitectureVersionRecord {
+  pk: string;
+  sk: string;
+  versionId: string;
+  architecture: ArchitectureModel;
+}
+
+interface DeploymentRecord {
+  pk: string;
+  sk: string;
+  deploymentId: string;
+  projectId: string;
+  userId: string;
+  status: string;
+  estimatedCostUsd: number;
+  createdAt: string;
+}
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   try {
     const auth = extractAuth(event);
     if (!auth) return unauthorized();
     const method = event.httpMethod;
-    const deploymentId = event.pathParameters?.deploymentId;
+    const projectId = event.pathParameters?.projectId;
 
-    if (method === 'POST' && !deploymentId) return requestDeployment(auth.userId, event.body);
-    if (method === 'GET' && deploymentId) return getDeploymentStatus(auth.userId, deploymentId);
-    if (method === 'DELETE' && deploymentId) return deleteStack(auth.userId, deploymentId);
+    if (!projectId) return badRequest('projectId is required');
+
+    if (method === 'POST' && event.resource.endsWith('/deploy')) return requestDeployment(auth.userId, projectId, event.body);
+    if (method === 'GET' && event.resource.includes('/deploy/status')) return getStackStatus(auth.userId, projectId);
+    if (method === 'DELETE' && event.resource.endsWith('/deploy')) return deleteDeployedStack(auth.userId, projectId);
 
     return badRequest('Unsupported method');
-  } catch {
+  } catch (err) {
+    console.error('Deployments handler error:', err);
     return serverError();
   }
 }
 
-async function requestDeployment(_userId: string, body: string | null): Promise<APIGatewayProxyResult> {
+async function requestDeployment(userId: string, projectId: string, body: string | null): Promise<APIGatewayProxyResult> {
   if (!body) return badRequest('Request body is required');
 
-  // TODO: Parse body with Zod (RequestDeploymentRequest)
-  // TODO: Load architecture model and CFN template
-  // TODO: Estimate cost via AWS Pricing API (cached in DynamoDB)
-  // TODO: Compare estimated cost against budget config
-  // TODO: If over budget, return suggestions without deploying
-  // TODO: STS AssumeRole with student's roleArn + ExternalId
-  // TODO: Apply session policy restricting to naming prefix
-  // TODO: Create CloudFormation stack via assumed role
-  // TODO: Configure CloudWatch billing alarm
-  // TODO: Save deployment record to DynamoDB
-  // TODO: If cleanupLambdaEnabled, schedule cleanup Lambda
+  const parsed = JSON.parse(body);
+  const { roleArn, externalId, maxMonthlySpend } = parsed;
+
+  if (!roleArn) return badRequest('roleArn is required');
+
+  const versions = await queryItems<ArchitectureVersionRecord>(
+    ARCHITECTURES_TABLE,
+    'pk = :pk',
+    { ':pk': `PROJECT#${projectId}` },
+    { scanForward: false, limit: 1 },
+  );
+
+  if (!versions[0]) return notFound('No architecture found for this project');
+
+  const architecture = versions[0].architecture;
+
+  const { estimateCost } = await import('../../services/cost-estimator');
+  const costEstimate = await estimateCost(architecture);
+
+  const { checkBudget } = await import('../../services/budget-gate');
+  const budgetLimit = maxMonthlySpend ?? 10;
+  const budgetResult = checkBudget(costEstimate.totalMonthlyUsd, budgetLimit);
+
+  if (!budgetResult.approved) {
+    return forbidden(budgetResult.message);
+  }
+
+  const { deployStack } = await import('../../services/deployment-engine');
+  const deployment = await deployStack(userId, projectId, architecture, costEstimate, {
+    roleArn,
+    externalId,
+  });
 
   return ok({
-    deploymentId: 'placeholder',
-    estimatedCostUsd: 0,
-    budgetComparison: {
-      estimatedMonthlyUsd: 0,
-      budgetLimitUsd: 0,
-      withinBudget: true,
-    },
-    status: 'pending-approval',
+    deploymentId: deployment.deploymentId,
+    status: deployment.status,
+    estimatedCostUsd: costEstimate.totalMonthlyUsd,
+    budgetWarning: budgetResult.warningLevel !== 'none' ? budgetResult.message : undefined,
   });
 }
 
-async function getDeploymentStatus(_userId: string, deploymentId: string): Promise<APIGatewayProxyResult> {
-  // TODO: Get deployment record from DynamoDB
-  // TODO: If status is 'creating', check CloudFormation stack status
-  // TODO: Fetch recent stack events
-  // TODO: Update record if status changed
+async function getStackStatus(userId: string, projectId: string): Promise<APIGatewayProxyResult> {
+  const deployments = await queryItems<DeploymentRecord>(
+    DEPLOYMENTS_TABLE,
+    'pk = :pk',
+    { ':pk': `PROJECT#${projectId}` },
+    { scanForward: false, limit: 1 },
+  );
 
-  return notFound(`Deployment ${deploymentId} not found`);
+  if (!deployments[0]) return notFound('No deployment found for this project');
+
+  return ok({
+    deploymentId: deployments[0].deploymentId,
+    status: deployments[0].status,
+    estimatedCostUsd: deployments[0].estimatedCostUsd,
+    createdAt: deployments[0].createdAt,
+  });
 }
 
-async function deleteStack(_userId: string, deploymentId: string): Promise<APIGatewayProxyResult> {
-  // TODO: Get deployment record
-  // TODO: Verify ownership
-  // TODO: STS AssumeRole to student's account
-  // TODO: Delete CloudFormation stack
-  // TODO: Update deployment status to 'deleting'
-  // TODO: Log audit event
+async function deleteDeployedStack(userId: string, projectId: string): Promise<APIGatewayProxyResult> {
+  const deployments = await queryItems<DeploymentRecord>(
+    DEPLOYMENTS_TABLE,
+    'pk = :pk',
+    { ':pk': `PROJECT#${projectId}` },
+    { scanForward: false, limit: 1 },
+  );
 
-  return ok({ deploymentId, status: 'deleting' });
+  if (!deployments[0]) return notFound('No deployment found for this project');
+
+  const { deleteStack } = await import('../../services/deployment-engine');
+  await deleteStack(deployments[0].deploymentId);
+
+  await updateItem(
+    DEPLOYMENTS_TABLE,
+    { pk: `PROJECT#${projectId}`, sk: deployments[0].sk },
+    'SET #s = :status',
+    { ':status': 'deleting' },
+  );
+
+  return ok({ deploymentId: deployments[0].deploymentId, status: 'deleting' });
 }
