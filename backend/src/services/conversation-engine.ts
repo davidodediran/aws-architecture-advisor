@@ -7,7 +7,7 @@ import { putItem, queryItems } from './dynamo-client';
 const CONVERSATIONS_TABLE = process.env.CONVERSATIONS_TABLE!;
 const ARCHITECTURE_VERSIONS_TABLE = process.env.ARCHITECTURE_VERSIONS_TABLE!;
 
-interface ConversationMessage {
+interface ConversationTurn {
   role: 'user' | 'assistant';
   content: string;
   timestamp: string;
@@ -16,6 +16,14 @@ interface ConversationMessage {
 interface ProcessResult {
   response: string;
   architecture?: ArchitectureModel;
+}
+
+function generateUlid(): string {
+  const timestamp = Date.now().toString(36).padStart(10, '0');
+  const random = Array.from({ length: 16 }, () =>
+    Math.floor(Math.random() * 36).toString(36),
+  ).join('');
+  return `${timestamp}${random}`.toUpperCase();
 }
 
 function extractArchitectureJson(text: string): ArchitectureModel | null {
@@ -32,17 +40,16 @@ function extractArchitectureJson(text: string): ArchitectureModel | null {
 }
 
 export async function processMessage(
-  userId: string,
   projectId: string,
+  userId: string,
   message: string,
   existingArchitecture?: ArchitectureModel,
 ): Promise<ProcessResult> {
-  const history = await getConversationHistory(userId, projectId);
-
   const ragContexts = await retrieveContext(message);
   const ragPrompt = formatContextForPrompt(ragContexts);
   const systemPrompt = buildSystemPrompt(ragPrompt, existingArchitecture ? JSON.stringify(existingArchitecture, null, 2) : undefined);
 
+  const history = await getConversationHistory(projectId);
   const messages = [
     ...history.map((m) => ({ role: m.role, content: m.content })),
     { role: 'user' as const, content: message },
@@ -51,17 +58,24 @@ export async function processMessage(
   const response = await invokeModel({ systemPrompt, messages });
 
   const now = new Date().toISOString();
+  const turnId = generateUlid();
+
   await putItem(CONVERSATIONS_TABLE, {
-    pk: `USER#${userId}#PROJECT#${projectId}`,
-    sk: `MSG#${now}#user`,
+    pk: `CONV#${projectId}`,
+    sk: `TURN#${turnId}`,
+    userId,
+    userMessage: message,
+    assistantMessage: response,
     role: 'user',
     content: message,
     timestamp: now,
   });
 
+  const assistantTurnId = generateUlid();
   await putItem(CONVERSATIONS_TABLE, {
-    pk: `USER#${userId}#PROJECT#${projectId}`,
-    sk: `MSG#${now}#assistant`,
+    pk: `CONV#${projectId}`,
+    sk: `TURN#${assistantTurnId}`,
+    userId,
     role: 'assistant',
     content: response,
     timestamp: now,
@@ -85,17 +99,16 @@ export async function processMessage(
 }
 
 export async function* streamMessage(
-  userId: string,
   projectId: string,
+  userId: string,
   message: string,
   existingArchitecture?: ArchitectureModel,
 ): AsyncGenerator<{ type: string; content?: string; architecture?: ArchitectureModel }> {
-  const history = await getConversationHistory(userId, projectId);
-
   const ragContexts = await retrieveContext(message);
   const ragPrompt = formatContextForPrompt(ragContexts);
   const systemPrompt = buildSystemPrompt(ragPrompt, existingArchitecture ? JSON.stringify(existingArchitecture, null, 2) : undefined);
 
+  const history = await getConversationHistory(projectId);
   const messages = [
     ...history.map((m) => ({ role: m.role, content: m.content })),
     { role: 'user' as const, content: message },
@@ -108,17 +121,22 @@ export async function* streamMessage(
   }
 
   const now = new Date().toISOString();
+  const userTurnId = generateUlid();
+
   await putItem(CONVERSATIONS_TABLE, {
-    pk: `USER#${userId}#PROJECT#${projectId}`,
-    sk: `MSG#${now}#user`,
+    pk: `CONV#${projectId}`,
+    sk: `TURN#${userTurnId}`,
+    userId,
     role: 'user',
     content: message,
     timestamp: now,
   });
 
+  const assistantTurnId = generateUlid();
   await putItem(CONVERSATIONS_TABLE, {
-    pk: `USER#${userId}#PROJECT#${projectId}`,
-    sk: `MSG#${now}#assistant`,
+    pk: `CONV#${projectId}`,
+    sk: `TURN#${assistantTurnId}`,
+    userId,
     role: 'assistant',
     content: fullResponse,
     timestamp: now,
@@ -142,14 +160,17 @@ export async function* streamMessage(
 }
 
 export async function getConversationHistory(
-  userId: string,
   projectId: string,
-): Promise<ConversationMessage[]> {
-  const items = await queryItems<ConversationMessage>(
+): Promise<ConversationTurn[]> {
+  const items = await queryItems<ConversationTurn & { pk: string; sk: string }>(
     CONVERSATIONS_TABLE,
     'pk = :pk',
-    { ':pk': `USER#${userId}#PROJECT#${projectId}` },
+    { ':pk': `CONV#${projectId}` },
     { scanForward: true, limit: 50 },
   );
-  return items;
+  return items.map((item) => ({
+    role: item.role,
+    content: item.content,
+    timestamp: item.timestamp,
+  }));
 }
