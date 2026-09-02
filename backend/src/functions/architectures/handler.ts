@@ -1,6 +1,6 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { extractAuth } from '../../middleware/auth';
-import { ok, badRequest, notFound, serverError } from '../../middleware/api-response';
+import { ok, badRequest, notFound, unauthorized, serverError } from '../../middleware/api-response';
 import { queryItems } from '../../services/dynamo-client';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { retrieveContext, formatContextForPrompt } from '../../services/knowledge-base';
@@ -22,6 +22,7 @@ interface ArchitectureVersionRecord {
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   try {
     const auth = extractAuth(event);
+    if (!auth) return unauthorized();
     const method = event.httpMethod;
     const projectId = event.pathParameters?.projectId;
     const path = event.resource;

@@ -5,7 +5,7 @@ import type {
   APIGatewayAuthorizerResult,
 } from 'aws-lambda';
 import { extractAuth, isTrainer } from '../../middleware/auth';
-import { ok, badRequest, forbidden, serverError } from '../../middleware/api-response';
+import { ok, badRequest, forbidden, unauthorized, serverError } from '../../middleware/api-response';
 import { getItem, putItem, updateItem } from '../../services/dynamo-client';
 
 const USER_QUOTA_TABLE = process.env.USER_QUOTA_TABLE!;
@@ -108,6 +108,7 @@ export async function authorizer(event: APIGatewayRequestAuthorizerEvent): Promi
 export async function trainerUnlock(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   try {
     const auth = extractAuth(event);
+    if (!auth) return unauthorized();
     if (!isTrainer(auth)) return forbidden('Only trainers can unlock student accounts');
     if (!event.body) return badRequest('Request body is required');
 

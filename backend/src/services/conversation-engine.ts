@@ -41,7 +41,7 @@ export async function processMessage(
 
   const ragContexts = await retrieveContext(message);
   const ragPrompt = formatContextForPrompt(ragContexts);
-  const systemPrompt = buildSystemPrompt(ragPrompt, existingArchitecture);
+  const systemPrompt = buildSystemPrompt(ragPrompt, existingArchitecture ? JSON.stringify(existingArchitecture, null, 2) : undefined);
 
   const messages = [
     ...history.map((m) => ({ role: m.role, content: m.content })),
@@ -94,7 +94,7 @@ export async function* streamMessage(
 
   const ragContexts = await retrieveContext(message);
   const ragPrompt = formatContextForPrompt(ragContexts);
-  const systemPrompt = buildSystemPrompt(ragPrompt, existingArchitecture);
+  const systemPrompt = buildSystemPrompt(ragPrompt, existingArchitecture ? JSON.stringify(existingArchitecture, null, 2) : undefined);
 
   const messages = [
     ...history.map((m) => ({ role: m.role, content: m.content })),

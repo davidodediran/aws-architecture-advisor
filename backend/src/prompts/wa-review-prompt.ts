@@ -1,11 +1,11 @@
 export function buildWaReviewPrompt(architectureJson: string, ragContext: string): string {
   return `Review the following AWS architecture against all six Well-Architected Framework pillars:
 
-1. Operational Excellence
-2. Security
-3. Reliability
-4. Performance Efficiency
-5. Cost Optimization
+1. Security
+2. Reliability
+3. Performance Efficiency
+4. Cost Optimization
+5. Operational Excellence
 6. Sustainability
 
 Architecture:
@@ -14,18 +14,10 @@ ${architectureJson}
 \`\`\`
 ${ragContext}
 
-For each pillar, identify:
-- Findings (what could be improved)
-- Severity (critical, high, medium, low)
-- Specific recommendations
-
-Format your response as a JSON array of findings inside \`\`\`json fences:
-[
-  {
-    "pillar": "security",
-    "severity": "high",
-    "finding": "description",
-    "recommendation": "what to do"
-  }
-]`;
+Analyze each pillar and return your findings as a JSON array inside \`\`\`json fences. Each finding must have:
+- "pillar": one of "security", "reliability", "performance", "cost-optimization", "operational-excellence", "sustainability"
+- "finding": a clear description of the issue
+- "severity": one of "critical", "high", "medium", "low"
+- "recommendation": a specific actionable recommendation
+- "waReference": a reference to the relevant Well-Architected Framework best practice or documentation`;
 }

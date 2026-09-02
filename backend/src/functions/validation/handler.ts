@@ -1,6 +1,6 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { extractAuth } from '../../middleware/auth';
-import { ok, badRequest, notFound, serverError } from '../../middleware/api-response';
+import { ok, badRequest, notFound, unauthorized, serverError } from '../../middleware/api-response';
 import { queryItems } from '../../services/dynamo-client';
 import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -22,6 +22,7 @@ const ALLOWED_CONTENT_TYPES = [
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   try {
     const auth = extractAuth(event);
+    if (!auth) return unauthorized();
     const path = event.resource;
     const method = event.httpMethod;
 

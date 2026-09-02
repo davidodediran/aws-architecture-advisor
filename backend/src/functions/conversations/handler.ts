@@ -1,7 +1,7 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { extractAuth } from '../../middleware/auth';
-import { ok, badRequest, notFound, serverError } from '../../middleware/api-response';
-import { getItem, queryItems } from '../../services/dynamo-client';
+import { ok, badRequest, notFound, unauthorized, serverError } from '../../middleware/api-response';
+import { queryItems } from '../../services/dynamo-client';
 import { processMessage, getConversationHistory } from '../../services/conversation-engine';
 
 const ARCHITECTURES_TABLE = process.env.ARCHITECTURE_VERSIONS_TABLE!;
@@ -15,6 +15,7 @@ interface ArchitectureVersionRecord {
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   try {
     const auth = extractAuth(event);
+    if (!auth) return unauthorized();
     const method = event.httpMethod;
     const projectId = event.pathParameters?.projectId;
 
