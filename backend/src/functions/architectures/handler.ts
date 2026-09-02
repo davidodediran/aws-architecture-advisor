@@ -29,9 +29,9 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     if (!projectId) return badRequest('projectId is required');
 
     if (method === 'GET' && path.endsWith('/architecture')) return getArchitecture(auth.userId, projectId);
-    if (method === 'POST' && path.includes('generate-cfn')) return generateCfn(auth.userId, projectId);
-    if (method === 'POST' && path.includes('validate')) return validateArchitecture(auth.userId, projectId);
-    if (method === 'GET' && path.includes('wa-review')) return getWaReview(auth.userId, projectId);
+    if (method === 'POST' && path.includes('/cfn')) return generateCfn(auth.userId, projectId);
+    if (method === 'POST' && path.includes('/review')) return postWaReview(auth.userId, projectId);
+    if (method === 'POST' && path.includes('/cost')) return estimateCost(auth.userId, projectId);
 
     return badRequest('Unsupported method');
   } catch (err) {
@@ -87,20 +87,7 @@ async function generateCfn(_userId: string, projectId: string): Promise<APIGatew
   });
 }
 
-async function validateArchitecture(_userId: string, projectId: string): Promise<APIGatewayProxyResult> {
-  const version = await loadLatestArchitecture(projectId);
-  if (!version) return notFound(`Architecture not found for project ${projectId}`);
-
-  const { validateTemplate } = await import('../../services/cfn-validator');
-  const { generateTemplate } = await import('../../services/cfn-generator');
-
-  const template = generateTemplate(version.architecture);
-  const result = await validateTemplate(template);
-
-  return ok(result);
-}
-
-async function getWaReview(_userId: string, projectId: string): Promise<APIGatewayProxyResult> {
+async function postWaReview(_userId: string, projectId: string): Promise<APIGatewayProxyResult> {
   const version = await loadLatestArchitecture(projectId);
   if (!version) return notFound(`Architecture not found for project ${projectId}`);
 
@@ -111,6 +98,16 @@ async function getWaReview(_userId: string, projectId: string): Promise<APIGatew
 
   const { reviewArchitecture } = await import('../../services/wa-reviewer');
   const result = await reviewArchitecture(version.architecture, ragPrompt);
+
+  return ok(result);
+}
+
+async function estimateCost(_userId: string, projectId: string): Promise<APIGatewayProxyResult> {
+  const version = await loadLatestArchitecture(projectId);
+  if (!version) return notFound(`Architecture not found for project ${projectId}`);
+
+  const { estimateCost: estimate } = await import('../../services/cost-estimator');
+  const result = await estimate(version.architecture);
 
   return ok(result);
 }

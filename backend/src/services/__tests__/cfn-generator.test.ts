@@ -301,6 +301,22 @@ describe('generateTemplate', () => {
     expect(template.Parameters.Environment).toBeDefined();
   });
 
+  it('propagates tags into generated resources', () => {
+    const arch = makeArchitecture(
+      [
+        { id: 'fn-1', type: 'lambda', name: 'Fn', logicalId: 'TaggedFn', config: {} },
+        { id: 'db-1', type: 'dynamodb', name: 'Db', logicalId: 'TaggedDb', config: {} },
+      ],
+      {
+        tags: { project: 'test-project', cohort_id: 'cohort-1', trainer_id: 'trainer-1' },
+      },
+    );
+
+    const template = generateTemplate(arch);
+    expect(template.Resources['TaggedFn']).toBeDefined();
+    expect(template.Resources['TaggedDb']).toBeDefined();
+  });
+
   it('generates Outputs for API Gateway, Lambda, and S3', () => {
     const arch = makeArchitecture([
       { id: 'apigw-1', type: 'api-gateway', name: 'API', logicalId: 'ApiGw', config: {} },

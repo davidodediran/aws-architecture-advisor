@@ -33,10 +33,11 @@ Globals:
         DEPLOYMENTS_TABLE: !Ref DeploymentsTable
         PRICING_CACHE_TABLE: !Ref PricingCacheTable
         TEMPLATES_BUCKET: !Ref TemplatesBucket
+        CONNECTIONS_TABLE: !Ref ConnectionsTable
 
 Resources:
   # ============================================================
-  # API Gateway
+  # REST API Gateway
   # ============================================================
   ApiGateway:
     Type: AWS::Serverless::Api
@@ -52,6 +53,86 @@ Resources:
         Authorizers:
           CognitoAuthorizer:
             UserPoolArn: !GetAtt CognitoUserPool.Arn
+
+  # ============================================================
+  # WebSocket API Gateway
+  # ============================================================
+  WebSocketApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub 'aws-arch-advisor-ws-${Environment}'
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: '$request.body.action'
+
+  WebSocketStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref WebSocketApi
+      StageName: !Ref Environment
+      AutoDeploy: true
+
+  WebSocketConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: '$connect'
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref WebSocketAuthorizerId
+      Target: !Sub 'integrations/${WebSocketConnectIntegration}'
+
+  WebSocketDisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: '$disconnect'
+      Target: !Sub 'integrations/${WebSocketDefaultIntegration}'
+
+  WebSocketSendMessageRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: 'sendMessage'
+      Target: !Sub 'integrations/${WebSocketDefaultIntegration}'
+
+  WebSocketConnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AiFunction.Arn}/invocations'
+
+  WebSocketDefaultIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AiFunction.Arn}/invocations'
+
+  WebSocketAuthorizerId:
+    Type: AWS::ApiGatewayV2::Authorizer
+    Properties:
+      ApiId: !Ref WebSocketApi
+      AuthorizerType: REQUEST
+      AuthorizerUri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AuthFunction.Arn}/invocations'
+      Name: WebSocketAuthorizer
+      IdentitySource:
+        - 'route.request.querystring.token'
+
+  AiFunctionWebSocketPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AiFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*'
+
+  AuthFunctionWebSocketPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AuthFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*'
 
   # ============================================================
   # Lambda Functions
@@ -80,6 +161,12 @@ Resources:
             RestApiId: !Ref ApiGateway
             Path: /projects/{projectId}
             Method: GET
+        UpdateProject:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /projects/{projectId}
+            Method: PUT
         DeleteProject:
           Type: Api
           Properties:
@@ -104,13 +191,13 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGateway
-            Path: /conversations/{projectId}/messages
+            Path: /projects/{projectId}/conversations
             Method: POST
         GetConversation:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGateway
-            Path: /conversations/{projectId}
+            Path: /projects/{projectId}/conversations
             Method: GET
       Policies:
         - DynamoDBCrudPolicy:
@@ -148,20 +235,20 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGateway
-            Path: /projects/{projectId}/architecture/generate-cfn
-            Method: POST
-        ValidateArchitecture:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ApiGateway
-            Path: /projects/{projectId}/architecture/validate
+            Path: /projects/{projectId}/architecture/cfn
             Method: POST
         WaReview:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGateway
-            Path: /projects/{projectId}/architecture/wa-review
-            Method: GET
+            Path: /projects/{projectId}/architecture/review
+            Method: POST
+        CostEstimate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /projects/{projectId}/architecture/cost
+            Method: POST
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ArchitecturesTable
@@ -178,6 +265,13 @@ Resources:
             - Effect: Allow
               Action:
                 - bedrock:Retrieve
+              Resource: '*'
+        - DynamoDBReadPolicy:
+            TableName: !Ref PricingCacheTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - pricing:GetProducts
               Resource: '*'
 
   DeploymentsFunction:
@@ -240,26 +334,30 @@ Resources:
     Properties:
       FunctionName: !Sub 'arch-advisor-ai-${Environment}'
       Handler: src/functions/ai/handler.handler
-      Events:
-        ListTemplates:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ApiGateway
-            Path: /ai/templates
-            Method: GET
-        CostEstimate:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ApiGateway
-            Path: /ai/cost-estimate
-            Method: POST
+      Timeout: 90
+      MemorySize: 512
       Policies:
         - DynamoDBCrudPolicy:
-            TableName: !Ref PricingCacheTable
+            TableName: !Ref ConnectionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConversationsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ArchitectureVersionsTable
         - Statement:
             - Effect: Allow
               Action:
-                - pricing:GetProducts
+                - execute-api:ManageConnections
+              Resource: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource: '*'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:Retrieve
               Resource: '*'
 
   ValidationFunction:
@@ -268,23 +366,34 @@ Resources:
       FunctionName: !Sub 'arch-advisor-validation-${Environment}'
       Handler: src/functions/validation/handler.handler
       Events:
+        ValidateCfn:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /validate/cfn
+            Method: POST
         GetUploadUrl:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGateway
-            Path: /validation/upload-url
+            Path: /upload-url
             Method: POST
-        ExportPortfolio:
+        ExportProject:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGateway
-            Path: /validation/export-portfolio
+            Path: /export/{projectId}
             Method: GET
       Policies:
         - S3CrudPolicy:
             BucketName: !Ref TemplatesBucket
         - DynamoDBReadPolicy:
             TableName: !Ref ProjectsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cloudformation:ValidateTemplate
+              Resource: '*'
 
   AuthFunction:
     Type: AWS::Serverless::Function
@@ -342,6 +451,25 @@ Resources:
           KeyType: RANGE
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
+
+  ConnectionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'arch-advisor-connections-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
 
   ArchitecturesTable:
     Type: AWS::DynamoDB::Table
@@ -525,6 +653,9 @@ Outputs:
   ApiUrl:
     Description: API Gateway endpoint URL
     Value: !Sub 'https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+  WebSocketUrl:
+    Description: WebSocket API endpoint URL
+    Value: !Sub 'wss://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
   UserPoolId:
     Description: Cognito User Pool ID
     Value: !Ref CognitoUserPool

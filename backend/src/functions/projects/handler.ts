@@ -7,6 +7,8 @@ import { ulid } from 'ulid';
 const PROJECTS_TABLE = process.env.PROJECTS_TABLE!;
 const USER_QUOTA_TABLE = process.env.USER_QUOTA_TABLE!;
 
+const FREE_TIER_PROJECT_LIMIT = 3;
+
 interface QuotaRecord {
   pk: string;
   sk: string;
@@ -24,6 +26,8 @@ interface ProjectRecord {
   status: string;
   region: string;
   templateId?: string;
+  cohort_id?: string;
+  trainer_id?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -37,6 +41,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     if (method === 'POST' && !projectId) return createProject(auth.userId, event.body);
     if (method === 'GET' && !projectId) return listProjects(auth.userId);
     if (method === 'GET' && projectId) return getProject(auth.userId, projectId);
+    if (method === 'PUT' && projectId) return updateProject(auth.userId, projectId, event.body);
     if (method === 'DELETE' && projectId) return deleteProject(auth.userId, projectId);
 
     return badRequest('Unsupported method');
@@ -50,7 +55,7 @@ async function createProject(userId: string, body: string | null): Promise<APIGa
   if (!body) return badRequest('Request body is required');
 
   const parsed = JSON.parse(body);
-  const { name, description, region, templateId } = parsed;
+  const { name, description, region, templateId, cohort_id, trainer_id } = parsed;
   if (!name || !description) return badRequest('name and description are required');
 
   const quota = await getItem<QuotaRecord>(USER_QUOTA_TABLE, {
@@ -58,7 +63,7 @@ async function createProject(userId: string, body: string | null): Promise<APIGa
     sk: 'quota',
   });
 
-  const maxProjects = quota?.maxProjects ?? 3;
+  const maxProjects = quota?.maxProjects ?? FREE_TIER_PROJECT_LIMIT;
   const usedProjects = quota?.usedProjects ?? 0;
 
   if (usedProjects >= maxProjects) {
@@ -78,6 +83,8 @@ async function createProject(userId: string, body: string | null): Promise<APIGa
     status: 'designing',
     region: region ?? 'us-east-1',
     templateId,
+    cohort_id,
+    trainer_id,
     createdAt: now,
     updatedAt: now,
   };
@@ -88,10 +95,10 @@ async function createProject(userId: string, body: string | null): Promise<APIGa
     USER_QUOTA_TABLE,
     { pk: `USER#${userId}`, sk: 'quota' },
     'SET usedProjects = if_not_exists(usedProjects, :zero) + :one, maxProjects = if_not_exists(maxProjects, :defaultMax)',
-    { ':zero': 0, ':one': 1, ':defaultMax': 3 },
+    { ':zero': 0, ':one': 1, ':defaultMax': FREE_TIER_PROJECT_LIMIT },
   );
 
-  return created({ projectId, name, status: 'designing', createdAt: now });
+  return created({ projectId, name, status: 'designing', cohort_id, trainer_id, createdAt: now });
 }
 
 async function listProjects(userId: string): Promise<APIGatewayProxyResult> {
@@ -109,6 +116,8 @@ async function listProjects(userId: string): Promise<APIGatewayProxyResult> {
         name: p.name,
         description: p.description,
         status: p.status,
+        cohort_id: p.cohort_id,
+        trainer_id: p.trainer_id,
         createdAt: p.createdAt,
         updatedAt: p.updatedAt,
       })),
@@ -124,6 +133,39 @@ async function getProject(userId: string, projectId: string): Promise<APIGateway
   if (!project) return notFound(`Project ${projectId} not found`);
 
   return ok(project);
+}
+
+async function updateProject(userId: string, projectId: string, body: string | null): Promise<APIGatewayProxyResult> {
+  if (!body) return badRequest('Request body is required');
+
+  const project = await getItem<ProjectRecord>(PROJECTS_TABLE, {
+    pk: `USER#${userId}`,
+    sk: `PROJECT#${projectId}`,
+  });
+
+  if (!project) return notFound(`Project ${projectId} not found`);
+
+  const parsed = JSON.parse(body);
+  const { name, description, region, status, cohort_id, trainer_id } = parsed;
+
+  const expressions: string[] = ['updatedAt = :now'];
+  const values: Record<string, unknown> = { ':now': new Date().toISOString() };
+
+  if (name !== undefined) { expressions.push('name = :name'); values[':name'] = name; }
+  if (description !== undefined) { expressions.push('description = :desc'); values[':desc'] = description; }
+  if (region !== undefined) { expressions.push('region = :region'); values[':region'] = region; }
+  if (status !== undefined) { expressions.push('#s = :status'); values[':status'] = status; }
+  if (cohort_id !== undefined) { expressions.push('cohort_id = :cohort'); values[':cohort'] = cohort_id; }
+  if (trainer_id !== undefined) { expressions.push('trainer_id = :trainer'); values[':trainer'] = trainer_id; }
+
+  await updateItem(
+    PROJECTS_TABLE,
+    { pk: `USER#${userId}`, sk: `PROJECT#${projectId}` },
+    `SET ${expressions.join(', ')}`,
+    values,
+  );
+
+  return ok({ projectId, message: 'Project updated' });
 }
 
 async function deleteProject(userId: string, projectId: string): Promise<APIGatewayProxyResult> {
