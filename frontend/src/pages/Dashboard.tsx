@@ -1,22 +1,30 @@
 import { Link } from 'react-router-dom';
-import { useState, useEffect } from 'react';
-
-interface Project {
-  projectId: string;
-  name: string;
-  description: string;
-  status: string;
-  updatedAt: string;
-}
+import { useEffect } from 'react';
+import { useProjectStore } from '../store/projectStore';
+import { api } from '../hooks/useApi';
+import type { ListProjectsResponse } from '@shared/types/api';
 
 export default function Dashboard() {
-  const [projects, _setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { projects, loading, error, setProjects, setLoading, setError } = useProjectStore();
 
   useEffect(() => {
-    // TODO: Fetch projects from API
-    setLoading(false);
-  }, []);
+    let cancelled = false;
+    setLoading(true);
+    api
+      .get<ListProjectsResponse>('/projects')
+      .then((res) => {
+        if (!cancelled) setProjects(res.projects);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load projects');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [setProjects, setLoading, setError]);
 
   return (
     <div className="dashboard">
@@ -27,6 +35,11 @@ export default function Dashboard() {
 
       {loading ? (
         <div className="loading">Loading projects...</div>
+      ) : error ? (
+        <div className="empty-state">
+          <h2>Error loading projects</h2>
+          <p>{error}</p>
+        </div>
       ) : projects.length === 0 ? (
         <div className="empty-state">
           <h2>No projects yet</h2>
