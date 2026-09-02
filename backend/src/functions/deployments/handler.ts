@@ -1,24 +1,17 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { extractAuth } from '../../middleware/auth';
 import { ok, badRequest, forbidden, notFound, serverError } from '../../middleware/api-response';
-import { getItem, putItem, queryItems, updateItem } from '../../services/dynamo-client';
+import { getItem, queryItems, updateItem } from '../../services/dynamo-client';
 import type { ArchitectureModel } from '@aws-arch-advisor/shared';
 
 const ARCHITECTURES_TABLE = process.env.ARCHITECTURE_VERSIONS_TABLE!;
 const DEPLOYMENTS_TABLE = process.env.DEPLOYMENTS_TABLE!;
-const USER_QUOTA_TABLE = process.env.USER_QUOTA_TABLE!;
 
 interface ArchitectureVersionRecord {
   pk: string;
   sk: string;
   versionId: string;
   architecture: ArchitectureModel;
-}
-
-interface UserProfile {
-  pk: string;
-  sk: string;
-  budgetLimitUsd?: number;
 }
 
 interface DeploymentRecord {
@@ -54,6 +47,11 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 async function requestDeployment(userId: string, projectId: string, body: string | null): Promise<APIGatewayProxyResult> {
   if (!body) return badRequest('Request body is required');
 
+  const parsed = JSON.parse(body);
+  const { roleArn, externalId, maxMonthlySpend } = parsed;
+
+  if (!roleArn) return badRequest('roleArn is required');
+
   const versions = await queryItems<ArchitectureVersionRecord>(
     ARCHITECTURES_TABLE,
     'pk = :pk',
@@ -68,25 +66,25 @@ async function requestDeployment(userId: string, projectId: string, body: string
   const { estimateCost } = await import('../../services/cost-estimator');
   const costEstimate = await estimateCost(architecture);
 
-  const profile = await getItem<UserProfile>(USER_QUOTA_TABLE, {
-    pk: `USER#${userId}`,
-    sk: 'profile',
-  });
+  const { checkBudget } = await import('../../services/budget-gate');
+  const budgetLimit = maxMonthlySpend ?? 10;
+  const budgetResult = checkBudget(costEstimate.totalMonthlyUsd, budgetLimit);
 
-  const budgetLimit = profile?.budgetLimitUsd ?? 10;
-  if (costEstimate.totalMonthlyUsd > budgetLimit) {
-    return forbidden(
-      `Estimated cost $${costEstimate.totalMonthlyUsd.toFixed(2)}/mo exceeds budget $${budgetLimit.toFixed(2)}/mo`,
-    );
+  if (!budgetResult.approved) {
+    return forbidden(budgetResult.message);
   }
 
   const { deployStack } = await import('../../services/deployment-engine');
-  const deployment = await deployStack(userId, projectId, architecture, costEstimate);
+  const deployment = await deployStack(userId, projectId, architecture, costEstimate, {
+    roleArn,
+    externalId,
+  });
 
   return ok({
     deploymentId: deployment.deploymentId,
     status: deployment.status,
     estimatedCostUsd: costEstimate.totalMonthlyUsd,
+    budgetWarning: budgetResult.warningLevel !== 'none' ? budgetResult.message : undefined,
   });
 }
 
