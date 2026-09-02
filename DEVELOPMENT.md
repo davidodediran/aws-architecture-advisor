@@ -8,7 +8,7 @@ Fully serverless on AWS:
 - **Frontend:** React + Vite SPA → S3 + CloudFront
 - **Backend:** API Gateway (REST + WebSocket) → Lambda (Node.js 20)
 - **Database:** DynamoDB (on-demand)
-- **AI:** Amazon Bedrock + Bedrock Knowledge Bases (RAG over WA Framework docs)
+- **AI:** Amazon Bedrock (Foundation Models) + Bedrock Knowledge Bases (RAG over WA Framework docs)
 - **Auth:** Amazon Cognito
 - **Observability:** CloudWatch + CloudTrail + X-Ray
 - **IaC:** CloudFormation (generated, not hand-written by LLM)
