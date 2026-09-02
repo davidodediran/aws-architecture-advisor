@@ -1,76 +1,115 @@
 import { useParams } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import ConversationPanel from '../components/ConversationPanel';
+import ArchitectureDiagram from '../components/ArchitectureDiagram';
+import CfnViewer from '../components/CfnViewer';
+import WaReview from '../components/WaReview';
+import CostEstimate from '../components/CostEstimate';
+import DeploymentPanel from '../components/DeploymentPanel';
+import { useArchitectureStore } from '../store/architectureStore';
+import { useConversationStore } from '../store/conversationStore';
+import { api } from '../hooks/useApi';
+import type { GetArchitectureResponse, GenerateCfnResponse, WaReviewResponse } from '@shared/types/api';
 
-interface Message {
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: string;
-}
+type Tab = 'diagram' | 'cfn' | 'wa' | 'cost' | 'deploy';
+
+const TABS: { key: Tab; label: string }[] = [
+  { key: 'diagram', label: 'Diagram' },
+  { key: 'cfn', label: 'CloudFormation' },
+  { key: 'wa', label: 'Well-Architected' },
+  { key: 'cost', label: 'Cost' },
+  { key: 'deploy', label: 'Deploy' },
+];
 
 export default function ProjectView() {
   const { projectId } = useParams<{ projectId: string }>();
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState('');
-  const [sending, setSending] = useState(false);
+  const [activeTab, setActiveTab] = useState<Tab>('diagram');
+  const {
+    architecture,
+    cfnTemplate,
+    costEstimate,
+    waReview,
+    setArchitecture,
+    setCfnTemplate,
+    setCostEstimate,
+    setWaReview,
+    reset,
+  } = useArchitectureStore();
+  const { clearMessages } = useConversationStore();
 
-  const handleSend = async () => {
-    if (!input.trim() || sending) return;
-    const userMessage: Message = { role: 'user', content: input, timestamp: new Date().toISOString() };
-    setMessages((prev) => [...prev, userMessage]);
-    setInput('');
-    setSending(true);
+  useEffect(() => {
+    reset();
+    clearMessages();
 
-    // TODO: Send message to API, receive architecture updates
-    const assistantMessage: Message = {
-      role: 'assistant',
-      content: 'Architecture advisor response will appear here.',
-      timestamp: new Date().toISOString(),
+    if (!projectId) return;
+    let cancelled = false;
+
+    api
+      .get<GetArchitectureResponse>(`/projects/${projectId}/architecture`)
+      .then((res) => {
+        if (cancelled) return;
+        setArchitecture(res.model);
+        if (res.costEstimateUsd !== undefined) {
+          const totalCost = res.model.resources.reduce<import('@shared/types/architecture-model').CostEstimate | null>(
+            (acc, r) => {
+              if (!r.costEstimate) return acc;
+              if (!acc) return r.costEstimate;
+              return {
+                monthlyUsd: acc.monthlyUsd + r.costEstimate.monthlyUsd,
+                breakdown: [...acc.breakdown, ...r.costEstimate.breakdown],
+                assumptions: [...new Set([...acc.assumptions, ...r.costEstimate.assumptions])],
+              };
+            },
+            null,
+          );
+          if (totalCost) setCostEstimate(totalCost);
+        }
+      })
+      .catch(() => {
+        // project may not have architecture yet
+      });
+
+    api.get<GenerateCfnResponse>(`/projects/${projectId}/cfn`).then((res) => {
+      if (!cancelled) setCfnTemplate(res);
+    }).catch(() => {});
+
+    api.get<WaReviewResponse>(`/projects/${projectId}/wa-review`).then((res) => {
+      if (!cancelled) setWaReview(res);
+    }).catch(() => {});
+
+    return () => {
+      cancelled = true;
     };
-    setMessages((prev) => [...prev, assistantMessage]);
-    setSending(false);
-  };
+  }, [projectId, setArchitecture, setCfnTemplate, setCostEstimate, setWaReview, reset, clearMessages]);
+
+  if (!projectId) return null;
 
   return (
     <div className="project-view">
-      <div className="conversation-panel">
-        <div className="conversation-header">
-          <h2>Project: {projectId}</h2>
-        </div>
-        <div className="messages">
-          {messages.length === 0 && (
-            <div className="empty-state">
-              <p>Describe the architecture you want to build. For example:</p>
-              <p><em>"I need a serverless REST API with DynamoDB, authentication, and a React frontend."</em></p>
-            </div>
-          )}
-          {messages.map((msg, i) => (
-            <div key={i} className={`message message-${msg.role}`}>
-              <div className="message-content">{msg.content}</div>
-            </div>
-          ))}
-          {sending && <div className="message message-assistant typing">Thinking...</div>}
-        </div>
-        <div className="input-area">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-            placeholder="Describe your architecture..."
-            rows={3}
-          />
-          <button className="btn btn-primary" onClick={handleSend} disabled={sending || !input.trim()}>
-            Send
-          </button>
-        </div>
-      </div>
+      <ConversationPanel projectId={projectId} />
       <div className="diagram-panel">
-        <div className="diagram-header">
-          <h2>Architecture Diagram</h2>
+        <div className="tabs">
+          {TABS.map((tab) => (
+            <button
+              key={tab.key}
+              className={`tab ${activeTab === tab.key ? 'tab-active' : ''}`}
+              onClick={() => setActiveTab(tab.key)}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
-        <div className="diagram-canvas">
-          <div className="empty-state">
-            <p>Your architecture diagram will appear here as you describe your system.</p>
-          </div>
+        <div className="tab-content">
+          {activeTab === 'diagram' && <ArchitectureDiagram architecture={architecture} />}
+          {activeTab === 'cfn' && <CfnViewer cfnTemplate={cfnTemplate} />}
+          {activeTab === 'wa' && <WaReview waReview={waReview} />}
+          {activeTab === 'cost' && <CostEstimate costEstimate={costEstimate} />}
+          {activeTab === 'deploy' && (
+            <DeploymentPanel
+              projectId={projectId}
+              architectureVersion={architecture?.metadata.version ?? 1}
+            />
+          )}
         </div>
       </div>
     </div>
