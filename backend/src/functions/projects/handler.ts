@@ -1,6 +1,6 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { extractAuth } from '../../middleware/auth';
-import { ok, created, badRequest, forbidden, notFound, serverError } from '../../middleware/api-response';
+import { ok, created, badRequest, forbidden, notFound, unauthorized, serverError } from '../../middleware/api-response';
 import { putItem, getItem, queryItems, updateItem, deleteItem } from '../../services/dynamo-client';
 import { ulid } from 'ulid';
 
@@ -35,6 +35,7 @@ interface ProjectRecord {
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   try {
     const auth = extractAuth(event);
+    if (!auth) return unauthorized();
     const method = event.httpMethod;
     const projectId = event.pathParameters?.projectId;
 
