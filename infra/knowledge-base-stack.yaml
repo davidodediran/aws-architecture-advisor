@@ -1,0 +1,61 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: AWS Architecture Advisor - S3 Document Store for Well-Architected Framework
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+
+Resources:
+  WaDocsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'arch-advisor-wa-docs-${Environment}-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - Key: Project
+          Value: aws-architecture-advisor
+
+  WaDocsReadRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'arch-advisor-wa-reader-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: WaDocsReadPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt WaDocsBucket.Arn
+                  - !Sub '${WaDocsBucket.Arn}/*'
+
+Outputs:
+  WaDocsBucketName:
+    Value: !Ref WaDocsBucket
+    Description: S3 bucket for WA Framework documents
+  WaDocsBucketArn:
+    Value: !GetAtt WaDocsBucket.Arn
+    Description: S3 bucket ARN
+  WaDocsReadRoleArn:
+    Value: !GetAtt WaDocsReadRole.Arn
+    Description: IAM role ARN for Lambda to read WA docs from S3

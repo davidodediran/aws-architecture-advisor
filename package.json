@@ -2,6 +2,9 @@
   "name": "aws-architecture-advisor",
   "version": "0.1.0",
   "private": true,
+  "description": "AI-Powered AWS Architecture Advisor & Deployment Platform",
+  "author": "David Odediran <david.odediran@amalitechtraining.org>",
+  "license": "MIT",
   "workspaces": [
     "frontend",
     "backend",
@@ -13,11 +16,18 @@
     "build": "npm run build --workspaces",
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present",
-    "deploy:infra": "cd infra && npx cdk deploy --all",
+    "typecheck": "tsc --build shared && npm run typecheck --workspaces --if-present",
+    "deploy:backend": "cd backend && sam deploy --guided",
+    "deploy:frontend-stack": "aws cloudformation deploy --template-file infra/frontend-stack.yaml --stack-name arch-advisor-frontend --capabilities CAPABILITY_IAM",
+    "deploy:kb-stack": "aws cloudformation deploy --template-file infra/knowledge-base-stack.yaml --stack-name arch-advisor-knowledge-base --capabilities CAPABILITY_NAMED_IAM",
     "validate:schema": "node scripts/validate-schema.mjs"
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "eslint": "^8.57.1"
   }
 }
