@@ -1,27 +1,17 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: >
-  AWS Architecture Advisor - Bedrock Knowledge Base Stack
-  OpenSearch Serverless vector store + Bedrock KB for Well-Architected Framework RAG
+Description: AWS Architecture Advisor - S3 Document Store for Well-Architected Framework
 
 Parameters:
   Environment:
     Type: String
-    Default: prod
+    Default: dev
     AllowedValues: [dev, staging, prod]
-    Description: Deployment environment
-
-  EmbeddingModelArn:
-    Type: String
-    Default: arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v2:0
-    Description: ARN of the embedding model (Titan Embed Text v2)
 
 Resources:
-  WADocsBucket:
+  WaDocsBucket:
     Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
     Properties:
-      BucketName: !Sub 'aws-arch-advisor-wa-docs-${Environment}-${AWS::AccountId}'
+      BucketName: !Sub 'arch-advisor-wa-docs-${Environment}-${AWS::AccountId}'
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -31,187 +21,41 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
-      VersioningConfiguration:
-        Status: Enabled
+      Tags:
+        - Key: Project
+          Value: aws-architecture-advisor
 
-  KnowledgeBaseRole:
+  WaDocsReadRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub 'aws-arch-advisor-kb-role-${Environment}'
+      RoleName: !Sub 'arch-advisor-wa-reader-${Environment}'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
           - Effect: Allow
             Principal:
-              Service: bedrock.amazonaws.com
+              Service: lambda.amazonaws.com
             Action: sts:AssumeRole
-            Condition:
-              StringEquals:
-                aws:SourceAccount: !Ref AWS::AccountId
       Policies:
-        - PolicyName: BedrockKBPolicy
+        - PolicyName: WaDocsReadPolicy
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              - Sid: S3Access
-                Effect: Allow
+              - Effect: Allow
                 Action:
                   - s3:GetObject
                   - s3:ListBucket
                 Resource:
-                  - !GetAtt WADocsBucket.Arn
-                  - !Sub '${WADocsBucket.Arn}/*'
-              - Sid: BedrockInvokeModel
-                Effect: Allow
-                Action:
-                  - bedrock:InvokeModel
-                Resource:
-                  - !Ref EmbeddingModelArn
-              - Sid: OpenSearchAccess
-                Effect: Allow
-                Action:
-                  - aoss:APIAccessAll
-                Resource:
-                  - !Sub 'arn:aws:aoss:${AWS::Region}:${AWS::AccountId}:collection/*'
-
-  VectorSearchCollection:
-    Type: AWS::OpenSearchServerless::Collection
-    DependsOn:
-      - EncryptionPolicy
-      - NetworkPolicy
-      - DataAccessPolicy
-    Properties:
-      Name: !Sub 'wa-kb-${Environment}'
-      Description: Vector store for Well-Architected Framework knowledge base
-      Type: VECTORSEARCH
-
-  EncryptionPolicy:
-    Type: AWS::OpenSearchServerless::SecurityPolicy
-    Properties:
-      Name: !Sub 'wa-kb-enc-${Environment}'
-      Type: encryption
-      Policy: !Sub |
-        {
-          "Rules": [
-            {
-              "ResourceType": "collection",
-              "Resource": ["collection/wa-kb-${Environment}"]
-            }
-          ],
-          "AWSOwnedKey": true
-        }
-
-  NetworkPolicy:
-    Type: AWS::OpenSearchServerless::SecurityPolicy
-    Properties:
-      Name: !Sub 'wa-kb-net-${Environment}'
-      Type: network
-      Policy: !Sub |
-        [
-          {
-            "Rules": [
-              {
-                "ResourceType": "collection",
-                "Resource": ["collection/wa-kb-${Environment}"]
-              },
-              {
-                "ResourceType": "dashboard",
-                "Resource": ["collection/wa-kb-${Environment}"]
-              }
-            ],
-            "AllowFromPublic": true
-          }
-        ]
-
-  DataAccessPolicy:
-    Type: AWS::OpenSearchServerless::AccessPolicy
-    Properties:
-      Name: !Sub 'wa-kb-data-${Environment}'
-      Type: data
-      Policy: !Sub |
-        [
-          {
-            "Rules": [
-              {
-                "ResourceType": "index",
-                "Resource": ["index/wa-kb-${Environment}/*"],
-                "Permission": [
-                  "aoss:CreateIndex",
-                  "aoss:DeleteIndex",
-                  "aoss:UpdateIndex",
-                  "aoss:DescribeIndex",
-                  "aoss:ReadDocument",
-                  "aoss:WriteDocument"
-                ]
-              },
-              {
-                "ResourceType": "collection",
-                "Resource": ["collection/wa-kb-${Environment}"],
-                "Permission": [
-                  "aoss:CreateCollectionItems",
-                  "aoss:DeleteCollectionItems",
-                  "aoss:UpdateCollectionItems",
-                  "aoss:DescribeCollectionItems"
-                ]
-              }
-            ],
-            "Principal": ["${KnowledgeBaseRole.Arn}"]
-          }
-        ]
-
-  BedrockKnowledgeBase:
-    Type: AWS::Bedrock::KnowledgeBase
-    DependsOn: VectorSearchCollection
-    Properties:
-      Name: !Sub 'aws-arch-advisor-wa-kb-${Environment}'
-      Description: Well-Architected Framework knowledge base for architecture recommendations
-      RoleArn: !GetAtt KnowledgeBaseRole.Arn
-      KnowledgeBaseConfiguration:
-        Type: VECTOR
-        VectorKnowledgeBaseConfiguration:
-          EmbeddingModelArn: !Ref EmbeddingModelArn
-      StorageConfiguration:
-        Type: OPENSEARCH_SERVERLESS
-        OpensearchServerlessConfiguration:
-          CollectionArn: !GetAtt VectorSearchCollection.Arn
-          VectorIndexName: wa-framework-index
-          FieldMapping:
-            MetadataField: metadata
-            TextField: text
-            VectorField: embedding
-
-  BedrockDataSource:
-    Type: AWS::Bedrock::DataSource
-    Properties:
-      KnowledgeBaseId: !Ref BedrockKnowledgeBase
-      Name: !Sub 'wa-docs-s3-${Environment}'
-      Description: Well-Architected Framework documentation from S3
-      DataSourceConfiguration:
-        Type: S3
-        S3Configuration:
-          BucketArn: !GetAtt WADocsBucket.Arn
+                  - !GetAtt WaDocsBucket.Arn
+                  - !Sub '${WaDocsBucket.Arn}/*'
 
 Outputs:
-  WADocsBucketName:
-    Description: S3 bucket for Well-Architected Framework documents
-    Value: !Ref WADocsBucket
-    Export:
-      Name: !Sub '${AWS::StackName}-WADocsBucket'
-
-  KnowledgeBaseId:
-    Description: Bedrock Knowledge Base ID
-    Value: !Ref BedrockKnowledgeBase
-    Export:
-      Name: !Sub '${AWS::StackName}-KnowledgeBaseId'
-
-  DataSourceId:
-    Description: Bedrock Data Source ID
-    Value: !Ref BedrockDataSource
-    Export:
-      Name: !Sub '${AWS::StackName}-DataSourceId'
-
-  CollectionEndpoint:
-    Description: OpenSearch Serverless collection endpoint
-    Value: !GetAtt VectorSearchCollection.CollectionEndpoint
-    Export:
-      Name: !Sub '${AWS::StackName}-CollectionEndpoint'
+  WaDocsBucketName:
+    Value: !Ref WaDocsBucket
+    Description: S3 bucket for WA Framework documents
+  WaDocsBucketArn:
+    Value: !GetAtt WaDocsBucket.Arn
+    Description: S3 bucket ARN
+  WaDocsReadRoleArn:
+    Value: !GetAtt WaDocsReadRole.Arn
+    Description: IAM role ARN for Lambda to read WA docs from S3
