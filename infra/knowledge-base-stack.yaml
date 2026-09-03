@@ -1,11 +1,14 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: AWS Architecture Advisor - S3 Document Store for Well-Architected Framework
+Description: AWS Architecture Advisor - Bedrock Knowledge Base with S3 Vector Store
 
 Parameters:
   Environment:
     Type: String
     Default: dev
     AllowedValues: [dev, staging, prod]
+  EmbeddingModelArn:
+    Type: String
+    Default: arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v2:0
 
 Resources:
   WaDocsBucket:
@@ -25,10 +28,98 @@ Resources:
         - Key: Project
           Value: aws-architecture-advisor
 
-  WaDocsReadRole:
+  VectorStoreBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'arch-advisor-vector-store-${Environment}-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - Key: Project
+          Value: aws-architecture-advisor
+
+  KnowledgeBaseRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub 'arch-advisor-wa-reader-${Environment}'
+      RoleName: !Sub 'arch-advisor-kb-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: KnowledgeBasePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: S3ReadDocs
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt WaDocsBucket.Arn
+                  - !Sub '${WaDocsBucket.Arn}/*'
+              - Sid: S3ReadWriteVectorStore
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt VectorStoreBucket.Arn
+                  - !Sub '${VectorStoreBucket.Arn}/*'
+              - Sid: InvokeEmbeddingModel
+                Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource:
+                  - !Ref EmbeddingModelArn
+
+  KnowledgeBase:
+    Type: AWS::Bedrock::KnowledgeBase
+    Properties:
+      Name: !Sub 'arch-advisor-wa-kb-${Environment}'
+      Description: Well-Architected Framework knowledge base for architecture reviews
+      RoleArn: !GetAtt KnowledgeBaseRole.Arn
+      KnowledgeBaseConfiguration:
+        Type: VECTOR
+        VectorKnowledgeBaseConfiguration:
+          EmbeddingModelArn: !Ref EmbeddingModelArn
+      StorageConfiguration:
+        Type: S3
+        S3Configuration:
+          BucketArn: !GetAtt VectorStoreBucket.Arn
+      Tags:
+        Project: aws-architecture-advisor
+
+  KnowledgeBaseDataSource:
+    Type: AWS::Bedrock::DataSource
+    Properties:
+      KnowledgeBaseId: !Ref KnowledgeBase
+      Name: !Sub 'wa-framework-docs-${Environment}'
+      Description: Well-Architected Framework source documents
+      DataSourceConfiguration:
+        Type: S3
+        S3Configuration:
+          BucketArn: !GetAtt WaDocsBucket.Arn
+          InclusionPrefixes:
+            - wa-framework/
+
+  LambdaReadRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'arch-advisor-kb-reader-${Environment}'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -36,26 +127,33 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-        - PolicyName: WaDocsReadPolicy
+        - PolicyName: BedrockKBReadPolicy
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
                 Action:
-                  - s3:GetObject
-                  - s3:ListBucket
+                  - bedrock:Retrieve
+                  - bedrock:RetrieveAndGenerate
                 Resource:
-                  - !GetAtt WaDocsBucket.Arn
-                  - !Sub '${WaDocsBucket.Arn}/*'
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${KnowledgeBase}'
 
 Outputs:
+  KnowledgeBaseId:
+    Value: !Ref KnowledgeBase
+    Description: Bedrock Knowledge Base ID
+  DataSourceId:
+    Value: !GetAtt KnowledgeBaseDataSource.DataSourceId
+    Description: Bedrock Data Source ID
   WaDocsBucketName:
     Value: !Ref WaDocsBucket
-    Description: S3 bucket for WA Framework documents
-  WaDocsBucketArn:
-    Value: !GetAtt WaDocsBucket.Arn
-    Description: S3 bucket ARN
-  WaDocsReadRoleArn:
-    Value: !GetAtt WaDocsReadRole.Arn
-    Description: IAM role ARN for Lambda to read WA docs from S3
+    Description: S3 bucket for WA Framework source documents
+  VectorStoreBucketName:
+    Value: !Ref VectorStoreBucket
+    Description: S3 bucket for vector store indexes
+  LambdaReadRoleArn:
+    Value: !GetAtt LambdaReadRole.Arn
+    Description: IAM role ARN for Lambda to query the Knowledge Base

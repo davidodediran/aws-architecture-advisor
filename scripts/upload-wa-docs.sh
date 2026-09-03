@@ -11,22 +11,30 @@ echo "Region: $REGION"
 # Get stack outputs
 STACK_NAME="arch-advisor-knowledge-base-${ENVIRONMENT}"
 
-BUCKET_NAME=$(aws cloudformation describe-stacks \
-  --stack-name "$STACK_NAME" \
-  --region "$REGION" \
-  --query "Stacks[0].Outputs[?OutputKey=='WaDocsBucketName'].OutputValue" \
-  --output text 2>/dev/null || echo "")
+get_output() {
+  aws cloudformation describe-stacks \
+    --stack-name "$STACK_NAME" \
+    --region "$REGION" \
+    --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" \
+    --output text 2>/dev/null || echo ""
+}
 
-if [ -z "$BUCKET_NAME" ]; then
-  echo "Error: Could not find stack. Deploy infra/knowledge-base-stack.yaml first."
+BUCKET_NAME=$(get_output "WaDocsBucketName")
+KB_ID=$(get_output "KnowledgeBaseId")
+DS_ID=$(get_output "DataSourceId")
+
+if [ -z "$BUCKET_NAME" ] || [ -z "$KB_ID" ] || [ -z "$DS_ID" ]; then
+  echo "Error: Could not find stack outputs. Deploy infra/knowledge-base-stack.yaml first."
   exit 1
 fi
 
 echo "Bucket: $BUCKET_NAME"
+echo "Knowledge Base: $KB_ID"
+echo "Data Source: $DS_ID"
 
 # Download WA Framework documentation
-WA_DOCS_DIR="/tmp/wa-framework-docs"
-mkdir -p "$WA_DOCS_DIR"
+WA_DOCS_DIR=$(mktemp -d)
+trap 'rm -rf "$WA_DOCS_DIR"' EXIT
 
 echo ""
 echo "Downloading Well-Architected Framework documentation..."
@@ -58,12 +66,62 @@ echo "Uploading documents to S3..."
 aws s3 sync "$WA_DOCS_DIR/" "s3://${BUCKET_NAME}/wa-framework/" \
   --region "$REGION"
 
-# Cleanup
-rm -rf "$WA_DOCS_DIR"
+# Start Bedrock ingestion job
+echo ""
+echo "Starting Bedrock Knowledge Base ingestion job..."
+INGESTION_JOB=$(aws bedrock-agent start-ingestion-job \
+  --knowledge-base-id "$KB_ID" \
+  --data-source-id "$DS_ID" \
+  --region "$REGION" \
+  --output json)
+
+JOB_ID=$(echo "$INGESTION_JOB" | python3 -c "import sys,json; print(json.load(sys.stdin)['ingestionJob']['ingestionJobId'])")
+echo "Ingestion job started: $JOB_ID"
+
+# Monitor ingestion job
+echo "Waiting for ingestion to complete..."
+while true; do
+  STATUS_JSON=$(aws bedrock-agent get-ingestion-job \
+    --knowledge-base-id "$KB_ID" \
+    --data-source-id "$DS_ID" \
+    --ingestion-job-id "$JOB_ID" \
+    --region "$REGION" \
+    --output json)
+
+  STATUS=$(echo "$STATUS_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['ingestionJob']['status'])")
+
+  case "$STATUS" in
+    COMPLETE)
+      echo "Ingestion complete!"
+      STATS=$(echo "$STATUS_JSON" | python3 -c "
+import sys, json
+s = json.load(sys.stdin)['ingestionJob'].get('statistics', {})
+print(f\"  Documents scanned: {s.get('numberOfDocumentsScanned', 'N/A')}\")
+print(f\"  Documents indexed: {s.get('numberOfNewDocumentsIndexed', 'N/A')}\")
+print(f\"  Documents failed:  {s.get('numberOfDocumentsFailed', 'N/A')}\")
+")
+      echo "$STATS"
+      break
+      ;;
+    FAILED)
+      echo "Error: Ingestion job failed."
+      echo "$STATUS_JSON" | python3 -c "
+import sys, json
+reasons = json.load(sys.stdin)['ingestionJob'].get('failureReasons', [])
+for r in reasons: print(f'  Reason: {r}')
+" 2>/dev/null || true
+      exit 1
+      ;;
+    *)
+      echo "  Status: $STATUS ..."
+      sleep 10
+      ;;
+  esac
+done
 
 echo ""
-echo "WA Framework document upload complete!"
+echo "WA Framework document upload and ingestion complete!"
 echo ""
 echo "Next steps:"
-echo "  1. Set WA_DOCS_BUCKET=$BUCKET_NAME in your backend environment"
+echo "  1. Set KNOWLEDGE_BASE_ID=$KB_ID in your backend environment"
 echo "  2. Deploy the backend: cd backend && sam deploy"
