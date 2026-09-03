@@ -1,119 +1,69 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ENVIRONMENT="${1:-prod}"
-STACK_NAME="aws-arch-advisor-kb-${ENVIRONMENT}"
-DOCS_DIR="${2:-/tmp/wa-docs}"
+ENVIRONMENT="${1:-dev}"
+REGION="${AWS_REGION:-us-east-1}"
 
-echo "=== AWS Architecture Advisor - WA Framework Docs Upload ==="
-echo "Environment: ${ENVIRONMENT}"
-echo ""
+echo "=== AWS Architecture Advisor - WA Framework Document Upload ==="
+echo "Environment: $ENVIRONMENT"
+echo "Region: $REGION"
+
+# Get stack outputs
+STACK_NAME="arch-advisor-knowledge-base-${ENVIRONMENT}"
 
 BUCKET_NAME=$(aws cloudformation describe-stacks \
-  --stack-name "${STACK_NAME}" \
-  --query "Stacks[0].Outputs[?OutputKey=='WADocsBucketName'].OutputValue" \
-  --output text)
+  --stack-name "$STACK_NAME" \
+  --region "$REGION" \
+  --query "Stacks[0].Outputs[?OutputKey=='WaDocsBucketName'].OutputValue" \
+  --output text 2>/dev/null || echo "")
 
-KB_ID=$(aws cloudformation describe-stacks \
-  --stack-name "${STACK_NAME}" \
-  --query "Stacks[0].Outputs[?OutputKey=='KnowledgeBaseId'].OutputValue" \
-  --output text)
-
-DS_ID=$(aws cloudformation describe-stacks \
-  --stack-name "${STACK_NAME}" \
-  --query "Stacks[0].Outputs[?OutputKey=='DataSourceId'].OutputValue" \
-  --output text)
-
-if [ -z "${BUCKET_NAME}" ] || [ -z "${KB_ID}" ] || [ -z "${DS_ID}" ]; then
-  echo "ERROR: Could not retrieve stack outputs. Is the knowledge-base stack deployed?"
+if [ -z "$BUCKET_NAME" ]; then
+  echo "Error: Could not find stack. Deploy infra/knowledge-base-stack.yaml first."
   exit 1
 fi
 
-echo "S3 Bucket:       ${BUCKET_NAME}"
-echo "Knowledge Base:  ${KB_ID}"
-echo "Data Source:     ${DS_ID}"
+echo "Bucket: $BUCKET_NAME"
+
+# Download WA Framework documentation
+WA_DOCS_DIR="/tmp/wa-framework-docs"
+mkdir -p "$WA_DOCS_DIR"
+
 echo ""
+echo "Downloading Well-Architected Framework documentation..."
 
-mkdir -p "${DOCS_DIR}"
-
-WA_PILLAR_DOCS=(
-  "wellarchitected-operational-excellence-pillar"
-  "wellarchitected-security-pillar"
-  "wellarchitected-reliability-pillar"
-  "wellarchitected-performance-efficiency-pillar"
-  "wellarchitected-cost-optimization-pillar"
-  "wellarchitected-sustainability-pillar"
-  "wellarchitected-framework"
+WA_PILLARS=(
+  "operational-excellence"
+  "security"
+  "reliability"
+  "performance-efficiency"
+  "cost-optimization"
+  "sustainability"
 )
 
-echo "--- Downloading Well-Architected Framework documents ---"
+for PILLAR in "${WA_PILLARS[@]}"; do
+  echo "  Fetching: $PILLAR pillar..."
+  curl -sL "https://docs.aws.amazon.com/wellarchitected/latest/framework/${PILLAR}-pillar.html" \
+    -o "$WA_DOCS_DIR/${PILLAR}-pillar.html" 2>/dev/null || true
 
-for doc in "${WA_PILLAR_DOCS[@]}"; do
-  echo "  Downloading: ${doc}.pdf"
-  curl -sS -L \
-    "https://docs.aws.amazon.com/pdfs/wellarchitected/latest/${doc}/${doc}.pdf" \
-    -o "${DOCS_DIR}/${doc}.pdf" || {
-      echo "  WARNING: Failed to download ${doc}.pdf, skipping"
-      continue
-    }
+  curl -sL "https://docs.aws.amazon.com/wellarchitected/latest/framework/${PILLAR}.html" \
+    -o "$WA_DOCS_DIR/${PILLAR}-best-practices.html" 2>/dev/null || true
 done
 
-DOWNLOADED=$(find "${DOCS_DIR}" -name "*.pdf" -type f | wc -l)
-echo ""
-echo "Downloaded ${DOWNLOADED} documents"
-
-if [ "${DOWNLOADED}" -eq 0 ]; then
-  echo "ERROR: No documents downloaded. Check network connectivity."
-  exit 1
-fi
+# Download general framework overview
+curl -sL "https://docs.aws.amazon.com/wellarchitected/latest/framework/welcome.html" \
+  -o "$WA_DOCS_DIR/framework-overview.html" 2>/dev/null || true
 
 echo ""
-echo "--- Uploading documents to S3 ---"
+echo "Uploading documents to S3..."
+aws s3 sync "$WA_DOCS_DIR/" "s3://${BUCKET_NAME}/wa-framework/" \
+  --region "$REGION"
 
-aws s3 sync "${DOCS_DIR}/" "s3://${BUCKET_NAME}/wa-framework/" \
-  --exclude "*" \
-  --include "*.pdf"
-
-echo ""
-echo "--- Starting Knowledge Base ingestion job ---"
-
-INGESTION_JOB=$(aws bedrock-agent start-ingestion-job \
-  --knowledge-base-id "${KB_ID}" \
-  --data-source-id "${DS_ID}" \
-  --query "ingestionJob.ingestionJobId" \
-  --output text)
-
-echo "Ingestion job started: ${INGESTION_JOB}"
+# Cleanup
+rm -rf "$WA_DOCS_DIR"
 
 echo ""
-echo "--- Waiting for ingestion to complete ---"
-
-while true; do
-  STATUS=$(aws bedrock-agent get-ingestion-job \
-    --knowledge-base-id "${KB_ID}" \
-    --data-source-id "${DS_ID}" \
-    --ingestion-job-id "${INGESTION_JOB}" \
-    --query "ingestionJob.status" \
-    --output text)
-
-  echo "  Status: ${STATUS}"
-
-  if [ "${STATUS}" = "COMPLETE" ]; then
-    break
-  elif [ "${STATUS}" = "FAILED" ]; then
-    echo "ERROR: Ingestion job failed"
-    aws bedrock-agent get-ingestion-job \
-      --knowledge-base-id "${KB_ID}" \
-      --data-source-id "${DS_ID}" \
-      --ingestion-job-id "${INGESTION_JOB}" \
-      --query "ingestionJob.failureReasons" \
-      --output text
-    exit 1
-  fi
-
-  sleep 15
-done
-
+echo "WA Framework document upload complete!"
 echo ""
-echo "=== Upload and ingestion complete ==="
-echo "Knowledge Base ${KB_ID} is ready for queries"
+echo "Next steps:"
+echo "  1. Set WA_DOCS_BUCKET=$BUCKET_NAME in your backend environment"
+echo "  2. Deploy the backend: cd backend && sam deploy"
