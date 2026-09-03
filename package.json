@@ -17,7 +17,9 @@
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "tsc --build shared && npm run typecheck --workspaces --if-present",
-    "deploy:infra": "cd infra && npx cdk deploy --all",
+    "deploy:backend": "cd backend && sam deploy --guided",
+    "deploy:frontend-stack": "aws cloudformation deploy --template-file infra/frontend-stack.yaml --stack-name arch-advisor-frontend --capabilities CAPABILITY_IAM",
+    "deploy:kb-stack": "aws cloudformation deploy --template-file infra/knowledge-base-stack.yaml --stack-name arch-advisor-knowledge-base --capabilities CAPABILITY_NAMED_IAM",
     "validate:schema": "node scripts/validate-schema.mjs"
   },
   "engines": {

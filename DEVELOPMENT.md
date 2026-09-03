@@ -19,7 +19,7 @@ Fully serverless on AWS:
 frontend/     React + Vite SPA
 backend/      Lambda functions (domain-grouped)
 shared/       TypeScript types, JSON schemas, constants shared across packages
-infra/        CloudFormation / CDK stacks
+infra/        CloudFormation stacks (frontend hosting, Bedrock Knowledge Base)
 docs/         Architecture docs, API spec, design decisions
 scripts/      Build, deploy, validation scripts
 ```

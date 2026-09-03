@@ -14,9 +14,6 @@ out/
 .aws-sam/
 samconfig.toml
 
-# CDK
-cdk.out/
-
 # Environment
 .env
 .env.local
