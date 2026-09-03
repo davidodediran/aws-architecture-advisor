@@ -6,19 +6,17 @@ export interface AuthContext {
   groups: string[];
 }
 
-export function extractAuth(event: APIGatewayProxyEvent): AuthContext {
-  const claims = event.requestContext.authorizer?.claims ?? {};
-  return {
-    userId: claims['sub'] ?? '',
-    email: claims['email'] ?? '',
-    groups: parseGroups(claims['cognito:groups']),
-  };
-}
+export function extractAuth(event: APIGatewayProxyEvent): AuthContext | null {
+  const claims = event.requestContext.authorizer?.claims;
+  if (!claims) return null;
 
-function parseGroups(groups: unknown): string[] {
-  if (typeof groups === 'string') return groups.split(',').map((g) => g.trim());
-  if (Array.isArray(groups)) return groups;
-  return [];
+  return {
+    userId: claims.sub ?? '',
+    email: claims.email ?? '',
+    groups: typeof claims['cognito:groups'] === 'string'
+      ? claims['cognito:groups'].split(',').map((g: string) => g.trim())
+      : [],
+  };
 }
 
 export function isTrainer(auth: AuthContext): boolean {

@@ -1,19 +1,44 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://aws-arch-advisor.dev/schemas/architecture-model.json",
-  "title": "ArchitectureModel",
-  "description": "AWS Architecture Advisor architecture model schema",
+  "$id": "https://aws-architecture-advisor.example.com/schemas/architecture-model/v1.0",
+  "title": "Architecture Model",
+  "description": "Single source of truth for an AWS architecture design",
   "type": "object",
   "required": ["schemaVersion", "metadata", "network", "resources", "connections", "securityGroups", "iamRoles", "tags"],
   "properties": {
-    "schemaVersion": { "type": "string", "const": "1.0" },
-    "metadata": { "$ref": "#/definitions/ModelMetadata" },
-    "network": { "$ref": "#/definitions/NetworkTopology" },
-    "resources": { "type": "array", "items": { "$ref": "#/definitions/Resource" }, "maxItems": 50 },
-    "connections": { "type": "array", "items": { "$ref": "#/definitions/Connection" }, "maxItems": 200 },
-    "securityGroups": { "type": "array", "items": { "$ref": "#/definitions/SecurityGroup" }, "maxItems": 25 },
-    "iamRoles": { "type": "array", "items": { "$ref": "#/definitions/IamRole" } },
-    "tags": { "type": "object", "additionalProperties": { "type": "string" } }
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "metadata": {
+      "$ref": "#/definitions/ModelMetadata"
+    },
+    "network": {
+      "$ref": "#/definitions/NetworkTopology"
+    },
+    "resources": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/Resource" },
+      "maxItems": 50
+    },
+    "connections": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/Connection" },
+      "maxItems": 200
+    },
+    "securityGroups": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/SecurityGroup" },
+      "maxItems": 25
+    },
+    "iamRoles": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/IamRole" }
+    },
+    "tags": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    }
   },
   "additionalProperties": false,
   "definitions": {
@@ -40,9 +65,19 @@
       "required": ["subnets", "availabilityZones", "publicAccess"],
       "properties": {
         "vpc": { "$ref": "#/definitions/VpcConfig" },
-        "subnets": { "type": "array", "items": { "$ref": "#/definitions/Subnet" } },
-        "availabilityZones": { "type": "array", "items": { "type": "string" } },
-        "publicAccess": { "type": "array", "items": { "$ref": "#/definitions/PublicAccessPoint" } }
+        "subnets": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Subnet" }
+        },
+        "availabilityZones": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "publicAccess": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/PublicAccessPoint" }
+        }
       },
       "additionalProperties": false
     },
@@ -50,7 +85,7 @@
       "type": "object",
       "required": ["cidrBlock", "enableDnsHostnames", "enableDnsSupport", "internetGateway", "natGateway"],
       "properties": {
-        "cidrBlock": { "type": "string" },
+        "cidrBlock": { "type": "string", "pattern": "^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}/\\d{1,2}$" },
         "enableDnsHostnames": { "type": "boolean" },
         "enableDnsSupport": { "type": "boolean" },
         "internetGateway": { "type": "boolean" },
@@ -96,7 +131,7 @@
         "id": { "type": "string" },
         "type": { "$ref": "#/definitions/ServiceType" },
         "name": { "type": "string" },
-        "logicalId": { "type": "string" },
+        "logicalId": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]*$" },
         "config": { "type": "object" },
         "subnet": { "type": "string" },
         "position": { "$ref": "#/definitions/DiagramPosition" },
@@ -120,8 +155,14 @@
       "required": ["monthlyUsd", "breakdown", "assumptions"],
       "properties": {
         "monthlyUsd": { "type": "number", "minimum": 0 },
-        "breakdown": { "type": "array", "items": { "$ref": "#/definitions/CostBreakdownItem" } },
-        "assumptions": { "type": "array", "items": { "type": "string" } }
+        "breakdown": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/CostBreakdownItem" }
+        },
+        "assumptions": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
       },
       "additionalProperties": false
     },
@@ -193,7 +234,13 @@
         "effect": { "type": "string", "enum": ["Allow", "Deny"] },
         "actions": { "type": "array", "items": { "type": "string" } },
         "resources": { "type": "array", "items": { "type": "string" } },
-        "conditions": { "type": "object", "additionalProperties": { "type": "object", "additionalProperties": { "type": "string" } } }
+        "conditions": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          }
+        }
       },
       "additionalProperties": false
     },
