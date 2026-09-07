@@ -23,10 +23,9 @@ echo "Reading stack outputs from $STACK_NAME..."
 
 DOCS_BUCKET_NAME=$(get_output "WaDocsBucketName")
 DOCS_BUCKET_ARN=$(get_output "WaDocsBucketArn")
-VECTOR_BUCKET_ARN=$(get_output "VectorStoreBucketArn")
 KB_ROLE_ARN=$(get_output "KnowledgeBaseRoleArn")
 
-if [ -z "$DOCS_BUCKET_NAME" ] || [ -z "$DOCS_BUCKET_ARN" ] || [ -z "$VECTOR_BUCKET_ARN" ] || [ -z "$KB_ROLE_ARN" ]; then
+if [ -z "$DOCS_BUCKET_NAME" ] || [ -z "$DOCS_BUCKET_ARN" ] || [ -z "$KB_ROLE_ARN" ]; then
   echo "Error: Could not find stack outputs. Deploy infra/knowledge-base-stack.yaml first:"
   echo "  aws cloudformation deploy \\"
   echo "    --template-file infra/knowledge-base-stack.yaml \\"
@@ -38,8 +37,49 @@ fi
 
 echo "  Docs bucket:   $DOCS_BUCKET_NAME"
 echo "  Docs ARN:      $DOCS_BUCKET_ARN"
-echo "  Vector ARN:    $VECTOR_BUCKET_ARN"
 echo "  KB Role ARN:   $KB_ROLE_ARN"
+
+VECTOR_BUCKET_NAME="arch-advisor-vectors-${ENVIRONMENT}"
+VECTOR_INDEX_NAME="wa-framework-${ENVIRONMENT}"
+
+echo ""
+echo "Creating S3 Vectors bucket: $VECTOR_BUCKET_NAME..."
+VECTOR_BUCKET_RESPONSE=$(aws s3vectors create-bucket \
+  --bucket-name "$VECTOR_BUCKET_NAME" \
+  --region "$REGION" \
+  --output json 2>&1) || {
+  if echo "$VECTOR_BUCKET_RESPONSE" | grep -q "AlreadyExists"; then
+    echo "  S3 Vectors bucket already exists, continuing..."
+    VECTOR_BUCKET_RESPONSE=$(aws s3vectors get-bucket \
+      --bucket-name "$VECTOR_BUCKET_NAME" \
+      --region "$REGION" \
+      --output json)
+  else
+    echo "Error creating S3 Vectors bucket: $VECTOR_BUCKET_RESPONSE"
+    exit 1
+  fi
+}
+VECTOR_BUCKET_ARN=$(echo "$VECTOR_BUCKET_RESPONSE" | python3 -c "import sys,json; data=json.load(sys.stdin); print(data.get('bucket',data).get('bucketArn', data.get('arn','')))")
+echo "  Vector bucket ARN: $VECTOR_BUCKET_ARN"
+
+echo ""
+echo "Creating vector index: $VECTOR_INDEX_NAME..."
+VECTOR_INDEX_RESPONSE=$(aws s3vectors create-index \
+  --bucket-name "$VECTOR_BUCKET_NAME" \
+  --index-name "$VECTOR_INDEX_NAME" \
+  --data-type "vector" \
+  --dimension 1024 \
+  --distance-metric "cosine" \
+  --region "$REGION" \
+  --output json 2>&1) || {
+  if echo "$VECTOR_INDEX_RESPONSE" | grep -q "AlreadyExists"; then
+    echo "  Vector index already exists, continuing..."
+  else
+    echo "Error creating vector index: $VECTOR_INDEX_RESPONSE"
+    exit 1
+  fi
+}
+echo "  Vector index created/verified: $VECTOR_INDEX_NAME"
 
 EMBEDDING_MODEL_ARN="arn:aws:bedrock:${REGION}::foundation-model/amazon.titan-embed-text-v2:0"
 
@@ -59,7 +99,7 @@ KB_RESPONSE=$(aws bedrock-agent create-knowledge-base \
     "type": "S3_VECTORS",
     "s3VectorsConfiguration": {
       "vectorBucketArn": "'"$VECTOR_BUCKET_ARN"'",
-      "indexName": "arch-advisor-wa-vectors-'"$ENVIRONMENT"'"
+      "indexName": "'"$VECTOR_INDEX_NAME"'"
     }
   }' \
   --region "$REGION" \
