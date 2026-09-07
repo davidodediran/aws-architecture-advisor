@@ -55,6 +55,13 @@ KB_RESPONSE=$(aws bedrock-agent create-knowledge-base \
       \"embeddingModelArn\": \"$EMBEDDING_MODEL_ARN\"
     }
   }" \
+  --storage-configuration '{
+    "type": "S3_VECTORS",
+    "s3VectorsConfiguration": {
+      "vectorBucketArn": "'"$VECTOR_BUCKET_ARN"'",
+      "indexName": "arch-advisor-wa-vectors-'"$ENVIRONMENT"'"
+    }
+  }' \
   --region "$REGION" \
   --output json)
 
