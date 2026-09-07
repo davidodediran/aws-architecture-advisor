@@ -3,10 +3,14 @@ set -euo pipefail
 
 ENVIRONMENT="${1:-dev}"
 REGION="${AWS_REGION:-eu-west-1}"
+S3_VECTORS_BUCKET_ARN="${S3_VECTORS_BUCKET_ARN:-arn:aws:s3vectors:${REGION}:$(aws sts get-caller-identity --query Account --output text):bucket/arch-advisor-vectors-${ENVIRONMENT}}"
+S3_VECTORS_INDEX_NAME="${S3_VECTORS_INDEX_NAME:-wa-framework-${ENVIRONMENT}}"
 
 echo "=== AWS Architecture Advisor - Bedrock Knowledge Base Setup ==="
 echo "Environment: $ENVIRONMENT"
 echo "Region: $REGION"
+echo "  S3 Vectors bucket: $S3_VECTORS_BUCKET_ARN"
+echo "  Index name:        $S3_VECTORS_INDEX_NAME"
 
 STACK_NAME="arch-advisor-knowledge-base-${ENVIRONMENT}"
 
@@ -39,48 +43,6 @@ echo "  Docs bucket:   $DOCS_BUCKET_NAME"
 echo "  Docs ARN:      $DOCS_BUCKET_ARN"
 echo "  KB Role ARN:   $KB_ROLE_ARN"
 
-VECTOR_BUCKET_NAME="arch-advisor-vectors-${ENVIRONMENT}"
-VECTOR_INDEX_NAME="wa-framework-${ENVIRONMENT}"
-
-echo ""
-echo "Creating S3 Vectors bucket: $VECTOR_BUCKET_NAME..."
-VECTOR_BUCKET_RESPONSE=$(aws s3vectors create-bucket \
-  --bucket-name "$VECTOR_BUCKET_NAME" \
-  --region "$REGION" \
-  --output json 2>&1) || {
-  if echo "$VECTOR_BUCKET_RESPONSE" | grep -q "AlreadyExists"; then
-    echo "  S3 Vectors bucket already exists, continuing..."
-    VECTOR_BUCKET_RESPONSE=$(aws s3vectors get-bucket \
-      --bucket-name "$VECTOR_BUCKET_NAME" \
-      --region "$REGION" \
-      --output json)
-  else
-    echo "Error creating S3 Vectors bucket: $VECTOR_BUCKET_RESPONSE"
-    exit 1
-  fi
-}
-VECTOR_BUCKET_ARN=$(echo "$VECTOR_BUCKET_RESPONSE" | python3 -c "import sys,json; data=json.load(sys.stdin); print(data.get('bucket',data).get('bucketArn', data.get('arn','')))")
-echo "  Vector bucket ARN: $VECTOR_BUCKET_ARN"
-
-echo ""
-echo "Creating vector index: $VECTOR_INDEX_NAME..."
-VECTOR_INDEX_RESPONSE=$(aws s3vectors create-index \
-  --bucket-name "$VECTOR_BUCKET_NAME" \
-  --index-name "$VECTOR_INDEX_NAME" \
-  --data-type "vector" \
-  --dimension 1024 \
-  --distance-metric "cosine" \
-  --region "$REGION" \
-  --output json 2>&1) || {
-  if echo "$VECTOR_INDEX_RESPONSE" | grep -q "AlreadyExists"; then
-    echo "  Vector index already exists, continuing..."
-  else
-    echo "Error creating vector index: $VECTOR_INDEX_RESPONSE"
-    exit 1
-  fi
-}
-echo "  Vector index created/verified: $VECTOR_INDEX_NAME"
-
 EMBEDDING_MODEL_ARN="arn:aws:bedrock:${REGION}::foundation-model/amazon.titan-embed-text-v2:0"
 
 echo ""
@@ -98,8 +60,8 @@ KB_RESPONSE=$(aws bedrock-agent create-knowledge-base \
   --storage-configuration '{
     "type": "S3_VECTORS",
     "s3VectorsConfiguration": {
-      "vectorBucketArn": "'"$VECTOR_BUCKET_ARN"'",
-      "indexName": "'"$VECTOR_INDEX_NAME"'"
+      "vectorBucketArn": "'"$S3_VECTORS_BUCKET_ARN"'",
+      "indexName": "'"$S3_VECTORS_INDEX_NAME"'"
     }
   }' \
   --region "$REGION" \
@@ -141,3 +103,6 @@ echo "     ./scripts/upload-wa-docs.sh $ENVIRONMENT"
 echo "  3. If your backend runs in a different region, also set BEDROCK_REGION=$REGION"
 echo "  4. Deploy the backend:"
 echo "     cd backend && sam deploy"
+echo ""
+echo "  Note: S3 Vectors bucket and index must be created via the AWS Console first."
+echo "  Override with: S3_VECTORS_BUCKET_ARN=... S3_VECTORS_INDEX_NAME=... ./scripts/setup-knowledge-base.sh dev"
