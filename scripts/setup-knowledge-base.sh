@@ -47,17 +47,12 @@ echo ""
 echo "Creating Bedrock Knowledge Base..."
 KB_RESPONSE=$(aws bedrock-agent create-knowledge-base \
   --name "arch-advisor-wa-kb-${ENVIRONMENT}" \
+  --description "AWS Well-Architected Framework knowledge base for architecture advisor" \
   --role-arn "$KB_ROLE_ARN" \
   --knowledge-base-configuration "{
     \"type\": \"VECTOR\",
     \"vectorKnowledgeBaseConfiguration\": {
       \"embeddingModelArn\": \"$EMBEDDING_MODEL_ARN\"
-    }
-  }" \
-  --storage-configuration "{
-    \"type\": \"S3_VECTORS\",
-    \"s3VectorsConfiguration\": {
-      \"vectorBucketArn\": \"$VECTOR_BUCKET_ARN\"
     }
   }" \
   --region "$REGION" \
