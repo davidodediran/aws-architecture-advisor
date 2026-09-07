@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ENVIRONMENT="${1:-dev}"
-REGION="${AWS_REGION:-us-east-1}"
+REGION="${AWS_REGION:-eu-west-1}"
 
 echo "=== AWS Architecture Advisor - Bedrock Knowledge Base Setup ==="
 echo "Environment: $ENVIRONMENT"
