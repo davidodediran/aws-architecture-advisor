@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: AWS Architecture Advisor - Bedrock Knowledge Base with S3 Vector Store
+Description: AWS Architecture Advisor - S3 Buckets and IAM Roles for Bedrock Knowledge Base
 
 Parameters:
   Environment:
@@ -86,36 +86,6 @@ Resources:
                 Resource:
                   - !Ref EmbeddingModelArn
 
-  KnowledgeBase:
-    Type: AWS::Bedrock::KnowledgeBase
-    Properties:
-      Name: !Sub 'arch-advisor-wa-kb-${Environment}'
-      Description: Well-Architected Framework knowledge base for architecture reviews
-      RoleArn: !GetAtt KnowledgeBaseRole.Arn
-      KnowledgeBaseConfiguration:
-        Type: VECTOR
-        VectorKnowledgeBaseConfiguration:
-          EmbeddingModelArn: !Ref EmbeddingModelArn
-      StorageConfiguration:
-        Type: S3
-        S3Configuration:
-          BucketArn: !GetAtt VectorStoreBucket.Arn
-      Tags:
-        Project: aws-architecture-advisor
-
-  KnowledgeBaseDataSource:
-    Type: AWS::Bedrock::DataSource
-    Properties:
-      KnowledgeBaseId: !Ref KnowledgeBase
-      Name: !Sub 'wa-framework-docs-${Environment}'
-      Description: Well-Architected Framework source documents
-      DataSourceConfiguration:
-        Type: S3
-        S3Configuration:
-          BucketArn: !GetAtt WaDocsBucket.Arn
-          InclusionPrefixes:
-            - wa-framework/
-
   LambdaReadRole:
     Type: AWS::IAM::Role
     Properties:
@@ -139,21 +109,24 @@ Resources:
                   - bedrock:Retrieve
                   - bedrock:RetrieveAndGenerate
                 Resource:
-                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${KnowledgeBase}'
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*'
 
 Outputs:
-  KnowledgeBaseId:
-    Value: !Ref KnowledgeBase
-    Description: Bedrock Knowledge Base ID
-  DataSourceId:
-    Value: !GetAtt KnowledgeBaseDataSource.DataSourceId
-    Description: Bedrock Data Source ID
   WaDocsBucketName:
     Value: !Ref WaDocsBucket
     Description: S3 bucket for WA Framework source documents
+  WaDocsBucketArn:
+    Value: !GetAtt WaDocsBucket.Arn
+    Description: ARN of the WA Framework source documents bucket
   VectorStoreBucketName:
     Value: !Ref VectorStoreBucket
     Description: S3 bucket for vector store indexes
+  VectorStoreBucketArn:
+    Value: !GetAtt VectorStoreBucket.Arn
+    Description: ARN of the vector store bucket
+  KnowledgeBaseRoleArn:
+    Value: !GetAtt KnowledgeBaseRole.Arn
+    Description: IAM role ARN for the Bedrock Knowledge Base
   LambdaReadRoleArn:
     Value: !GetAtt LambdaReadRole.Arn
     Description: IAM role ARN for Lambda to query the Knowledge Base

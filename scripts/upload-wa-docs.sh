@@ -20,11 +20,19 @@ get_output() {
 }
 
 BUCKET_NAME=$(get_output "WaDocsBucketName")
-KB_ID=$(get_output "KnowledgeBaseId")
-DS_ID=$(get_output "DataSourceId")
 
-if [ -z "$BUCKET_NAME" ] || [ -z "$KB_ID" ] || [ -z "$DS_ID" ]; then
+if [ -z "$BUCKET_NAME" ]; then
   echo "Error: Could not find stack outputs. Deploy infra/knowledge-base-stack.yaml first."
+  exit 1
+fi
+
+# KB and DS IDs come from environment variables (set after running setup-knowledge-base.sh)
+KB_ID="${KNOWLEDGE_BASE_ID:-}"
+DS_ID="${DATA_SOURCE_ID:-}"
+
+if [ -z "$KB_ID" ] || [ -z "$DS_ID" ]; then
+  echo "Error: KNOWLEDGE_BASE_ID and DATA_SOURCE_ID environment variables are required."
+  echo "Run scripts/setup-knowledge-base.sh first, then export the IDs it prints."
   exit 1
 fi
 
