@@ -4,10 +4,11 @@ import {
 } from '@aws-sdk/client-bedrock-agent-runtime';
 
 const KNOWLEDGE_BASE_ID = process.env.KNOWLEDGE_BASE_ID ?? '';
+const BEDROCK_REGION = process.env.BEDROCK_REGION || '';
 const MIN_RELEVANCE_SCORE = 0.5;
 const MAX_RESULTS = 5;
 
-const client = new BedrockAgentRuntimeClient({});
+const client = new BedrockAgentRuntimeClient(BEDROCK_REGION ? { region: BEDROCK_REGION } : {});
 
 export interface RetrievedContext {
   content: string;
