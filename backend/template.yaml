@@ -14,6 +14,14 @@ Parameters:
     Type: String
     Default: 'http://localhost:3000'
     Description: Allowed origin for CORS headers
+  KnowledgeBaseId:
+    Type: String
+    Default: ''
+    Description: Bedrock Knowledge Base ID for RAG retrieval
+  BedrockRegion:
+    Type: String
+    Default: ''
+    Description: AWS region for Bedrock Knowledge Base (if different from stack region)
 
 Globals:
   Function:
@@ -34,6 +42,8 @@ Globals:
         PRICING_CACHE_TABLE: !Ref PricingCacheTable
         TEMPLATES_BUCKET: !Ref TemplatesBucket
         CONNECTIONS_TABLE: !Ref ConnectionsTable
+        KNOWLEDGE_BASE_ID: !Ref KnowledgeBaseId
+        BEDROCK_REGION: !Ref BedrockRegion
 
 Resources:
   # ============================================================
